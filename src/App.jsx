@@ -1,5 +1,17 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { PieChart, Pie, Label, Tooltip as RechartsTooltip, Cell, AreaChart, Area, XAxis, CartesianGrid, ResponsiveContainer } from "recharts";
+// ─── Mobile Detection ───
+const useIsMobile = (breakpoint = 600) => {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < breakpoint);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const handler = (e) => setIsMobile(e.matches);
+    setIsMobile(mq.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [breakpoint]);
+  return isMobile;
+};
 // ─── FSRS-5 (Free Spaced Repetition Scheduler) ───
 // Based on the open-spaced-repetition project
 // DSR model: Difficulty, Stability, Retrievability
@@ -825,6 +837,7 @@ function AddCardForm({ onAdd, onCancel }) {
 }
 // ─── Practice Card ───
 function PracticeCard({ card, onReview, onSkip, totalDue }) {
+  const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
   const handleReview = (quality) => {
@@ -851,9 +864,9 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
           background: T.bgCard,
           border: `1px solid ${T.border}`,
           borderRadius: T.radius,
-          padding: "56px 40px",
+          padding: mobile ? "36px 20px" : "56px 40px",
           cursor: flipped ? "default" : "pointer",
-          minHeight: 240,
+          minHeight: mobile ? 180 : 240,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -868,7 +881,7 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
               {t.english}
             </div>
-            <div style={{ fontFamily: font.display, fontSize: 34, fontWeight: 400, color: T.text, lineHeight: 1.2 }}>
+            <div style={{ fontFamily: font.display, fontSize: mobile ? 26 : 34, fontWeight: 400, color: T.text, lineHeight: 1.2 }}>
               {card.translation}
             </div>
             <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 32, letterSpacing: 0.5 }}>
@@ -880,11 +893,11 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.keyword, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
               {t.portuguese}
             </div>
-            <div style={{ fontFamily: font.display, fontSize: 38, fontWeight: 400, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
+            <div style={{ fontFamily: font.display, fontSize: mobile ? 28 : 38, fontWeight: 400, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
               {card.word}
             </div>
             {card.phrase && (
-              <div style={{ marginTop: 16, maxWidth: 380 }}>
+              <div style={{ marginTop: 16, maxWidth: mobile ? "100%" : 380 }}>
                 <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="normal" />
               </div>
             )}
@@ -913,14 +926,14 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
         )}
       </div>
       {flipped && (
-        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <div style={{ display: "flex", flexWrap: mobile ? "wrap" : "nowrap", gap: 8, marginTop: 16 }}>
           {qualityButtons.map((btn) => (
             <button
               key={btn.q}
               onClick={() => handleReview(btn.q)}
               style={{
-                flex: 1,
-                padding: "14px 6px 12px",
+                flex: mobile ? "1 1 28%" : 1,
+                padding: mobile ? "10px 4px 8px" : "14px 6px 12px",
                 background: T.bgCard,
                 border: `1px solid ${T.border}`,
                 borderRadius: T.radiusSm,
@@ -948,6 +961,7 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
 }
 // ─── Word Row ───
 function WordRow({ card, onDelete, onSpeak, onUpdate }) {
+  const mobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const isOverdue = card.dueDate <= today();
   const daysUntil = Math.ceil((new Date(card.dueDate) - new Date(today())) / 86400000);
@@ -1032,6 +1046,98 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
     wordBreak: "break-word",
     whiteSpace: "pre-wrap",
   };
+  if (mobile) {
+    return (
+      <div
+        style={{
+          padding: "12px 16px",
+          borderBottom: `1px solid ${T.border}`,
+          position: "relative",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+          <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, wordBreak: "break-word" }}>{card.word}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {(() => {
+              const stage = getStage(card);
+              const sc = stageColors[stage];
+              const isDark = T.bg === "#111614";
+              return (
+                <span style={{
+                  fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
+                  background: sc.bg, color: isDark ? sc.darkText : sc.text,
+                }}>
+                  {stageLabel(stage)}
+                </span>
+              );
+            })()}
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer", padding: "4px 6px",
+                  borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill={T.textSecondary}>
+                  <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                </svg>
+              </button>
+              {menuOpen && (
+                <div style={{
+                  position: "absolute", right: 0, top: "100%", marginTop: 4, zIndex: 10,
+                  background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                  boxShadow: T.shadowLg, overflow: "hidden", minWidth: 150,
+                }}>
+                  <button
+                    onClick={() => { onSpeak(card.phrase || card.word); setMenuOpen(false); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                      background: "none", border: "none", cursor: "pointer",
+                      fontFamily: font.body, fontSize: 13, color: T.textSecondary, textAlign: "left",
+                    }}
+                  >
+                    <SpeakerIcon size={14} color={T.textTertiary} />
+                    {t.listenPronunciation}
+                  </button>
+                  <button
+                    onClick={() => { onDelete(card.id); setMenuOpen(false); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                      background: "none", border: "none", cursor: "pointer",
+                      fontFamily: font.body, fontSize: 13, color: T.danger, textAlign: "left",
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    {t.delete}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div style={{ fontFamily: font.body, fontSize: 13, color: T.textSecondary, marginBottom: 4, wordBreak: "break-word" }}>
+          {card.translation}
+        </div>
+        {card.phrase && (
+          <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, wordBreak: "break-word" }}>
+            <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="small" />
+          </div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+          <span style={{
+            fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
+            background: isNew ? T.accentSoft : isOverdue ? T.dangerBg : T.accentSoft,
+            color: isNew ? T.textTertiary : isOverdue ? T.danger : T.textTertiary,
+          }}>
+            {dueLabel}
+          </span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div
       style={{
@@ -1134,6 +1240,7 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
 const iconBtnStyle = { background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.5, transition: "opacity 0.15s" };
 // ─── Full Page Modal ───
 function Modal({ open, onClose, title, children }) {
+  const mobile = useIsMobile();
   if (!open) return null;
   return (
     <div style={{
@@ -1144,7 +1251,7 @@ function Modal({ open, onClose, title, children }) {
       <button
         onClick={onClose}
         style={{
-          position: "fixed", top: 20, right: 20, zIndex: 110,
+          position: "fixed", top: mobile ? 12 : 20, right: mobile ? 12 : 20, zIndex: 110,
           width: 44, height: 44, borderRadius: 22,
           background: T.bgCard,
           border: `1px solid ${T.border}`,
@@ -1160,9 +1267,9 @@ function Modal({ open, onClose, title, children }) {
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       </button>
-      <div style={{ padding: "36px 32px 60px", maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 60px" : "36px 32px 60px", maxWidth: 760, margin: "0 auto" }}>
         {title && (
-          <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 700, color: T.text, marginBottom: 28, textTransform: "capitalize" }}>
+          <div style={{ fontFamily: font.display, fontSize: mobile ? 20 : 24, fontWeight: 700, color: T.text, marginBottom: mobile ? 20 : 28, textTransform: "capitalize" }}>
             {title}
           </div>
         )}
@@ -1214,6 +1321,7 @@ function EditableCell({ html, onCommit, style }) {
 }
 // ─── Import Panel ───
 function ImportPanel({ onImport, existingCount }) {
+  const mobile = useIsMobile();
   const [text, setText] = useState("");
   const [results, setResults] = useState([]);
   const [errors, setErrors] = useState([]);
@@ -1446,7 +1554,7 @@ function ImportPanel({ onImport, existingCount }) {
               {t.add} {selected.size} {selected.size === 1 ? t.word : t.wordsPlural}
             </button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "40px 1fr 1fr 2fr", gap: 12, padding: "10px 20px", borderBottom: `1px solid ${T.border}`, background: T.bgCardHover }}>
+          <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "40px 1fr 1fr 2fr", gap: 12, padding: "10px 20px", borderBottom: `1px solid ${T.border}`, background: T.bgCardHover }}>
             <div
               onClick={allSelected ? deselectAll : selectAll}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
@@ -1477,7 +1585,15 @@ function ImportPanel({ onImport, existingCount }) {
             return (
               <div
                 key={i}
-                style={{
+                style={mobile ? {
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  padding: "10px 16px",
+                  borderBottom: i < results.length - 1 ? `1px solid ${T.border}` : "none",
+                  opacity: isSelected ? 1 : 0.4,
+                  background: isSelected ? "transparent" : T.bgCardHover,
+                } : {
                   display: "grid",
                   gridTemplateColumns: "40px 1fr 1fr 2fr",
                   gap: 12,
@@ -1491,7 +1607,7 @@ function ImportPanel({ onImport, existingCount }) {
               >
                 <div
                   onClick={() => toggleItem(i)}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", paddingTop: 4 }}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", paddingTop: 4, flexShrink: 0 }}
                 >
                   <div style={{
                     width: 22, height: 22, borderRadius: 6,
@@ -1507,9 +1623,19 @@ function ImportPanel({ onImport, existingCount }) {
                     )}
                   </div>
                 </div>
-                <span style={{ fontFamily: font.body, fontSize: 14, fontWeight: 700, color: T.keyword, padding: "6px 0", wordBreak: "break-word" }}>{r.word}</span>
-                <EditableCell html={toHtml(r, "translation")} onCommit={(html) => commitCell(i, "translation", html)} style={cellStyle} />
-                <EditableCell html={toHtml(r, "portuguese")} onCommit={(html) => commitCell(i, "portuguese", html)} style={cellStyle} />
+                {mobile ? (
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 700, color: T.keyword, wordBreak: "break-word" }}>{r.word}</div>
+                    <div style={{ fontFamily: font.body, fontSize: 13, color: T.textSecondary, marginTop: 2, wordBreak: "break-word" }}>{r.translation}</div>
+                    {r.phrase && <div style={{ fontFamily: font.body, fontSize: 12, color: T.textTertiary, marginTop: 2, wordBreak: "break-word" }}>{r.phrase}</div>}
+                  </div>
+                ) : (
+                  <>
+                    <span style={{ fontFamily: font.body, fontSize: 14, fontWeight: 700, color: T.keyword, padding: "6px 0", wordBreak: "break-word" }}>{r.word}</span>
+                    <EditableCell html={toHtml(r, "translation")} onCommit={(html) => commitCell(i, "translation", html)} style={cellStyle} />
+                    <EditableCell html={toHtml(r, "portuguese")} onCommit={(html) => commitCell(i, "portuguese", html)} style={cellStyle} />
+                  </>
+                )}
               </div>
             );
           })}
@@ -1850,6 +1976,7 @@ const GSheets = {
 };
 // ─── Main App ───
 export default function VocabApp() {
+  const mobile = useIsMobile();
   const [cards, setCards] = useState([]);
   const [practiceDays, setPracticeDays] = useState({});
   const [view, setView] = useState("practice");
@@ -2022,14 +2149,16 @@ export default function VocabApp() {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.text }}>
       <style>{`
-        * { -webkit-font-smoothing: antialiased; }
+        * { -webkit-font-smoothing: antialiased; box-sizing: border-box; }
         ::placeholder { color: ${T.textPlaceholder}; }
         textarea::placeholder { color: ${T.textPlaceholder}; }
         button:active { transform: scale(0.98); }
         [contenteditable] b, [contenteditable] strong { color: ${T.keyword}; font-weight: 700; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .nav-scroll::-webkit-scrollbar { display: none; }
+        .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-      <div style={{ padding: "36px 32px 0", maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 0" : "36px 32px 0", maxWidth: 760, margin: "0 auto" }}>
         <div style={{ marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h1 style={{ fontFamily: font.display, fontSize: 28, fontWeight: 700, color: T.text, margin: 0, letterSpacing: -0.5, textTransform: "capitalize" }}>
             vocabulário
@@ -2074,27 +2203,29 @@ export default function VocabApp() {
             </span>
           </button>
         </div>
-        <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.border}` }}>
+        <div className="nav-scroll" style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.border}`, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setView(item.id)}
               style={{
-                padding: "12px 20px",
+                padding: mobile ? "10px 14px" : "12px 20px",
                 background: "none",
                 border: "none",
                 borderBottom: view === item.id ? `2px solid ${T.accent}` : "2px solid transparent",
                 color: view === item.id ? T.text : T.textTertiary,
                 fontFamily: font.body,
-                fontSize: 14,
+                fontSize: mobile ? 13 : 14,
                 fontWeight: 500,
                 cursor: "pointer",
                 transition: "color 0.15s, border-color 0.15s",
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
+                gap: 6,
                 letterSpacing: 0.2,
                 textTransform: "capitalize",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
               {item.label}
@@ -2112,7 +2243,7 @@ export default function VocabApp() {
           ))}
         </div>
       </div>
-      <div style={{ padding: "32px 32px 60px", maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 60px" : "32px 32px 60px", maxWidth: 760, margin: "0 auto" }}>
         {view === "practice" && (
           <>
             {dueCards.length === 0 ? (
@@ -2205,7 +2336,7 @@ export default function VocabApp() {
               </div>
             ) : (
               <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard, overflow: "hidden", boxShadow: T.shadow }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
+                <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 2fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
                   {[
                     { key: "word", label: t.headerPalavra },
                     { key: "translation", label: t.headerEnglish },
@@ -2249,7 +2380,7 @@ export default function VocabApp() {
         )}
         {view === "heatmap" && (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr 1fr 1fr" : "1fr 1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
               {[
                 { label: t.dayStreak, value: (() => {
                   let streak = 0;
@@ -2270,13 +2401,13 @@ export default function VocabApp() {
                   return (Object.values(practiceDays).reduce((a, b) => a + b, 0) / ad).toFixed(1);
                 })() },
               ].map((stat, i) => (
-                <div key={i} style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: "22px 16px", textAlign: "center", boxShadow: T.shadow }}>
-                  <div style={{ fontFamily: font.display, fontSize: 32, fontWeight: 700, color: T.text }}>{stat.value}</div>
-                  <div style={{ fontFamily: font.mono, fontSize: 9, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.8, marginTop: 6 }}>{stat.label}</div>
+                <div key={i} style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "14px 8px" : "22px 16px", textAlign: "center", boxShadow: T.shadow }}>
+                  <div style={{ fontFamily: font.display, fontSize: mobile ? 22 : 32, fontWeight: 700, color: T.text }}>{stat.value}</div>
+                  <div style={{ fontFamily: font.mono, fontSize: mobile ? 8 : 9, color: T.textTertiary, textTransform: "uppercase", letterSpacing: mobile ? 1 : 1.8, marginTop: 4 }}>{stat.label}</div>
                 </div>
               ))}
             </div>
-            <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 28, boxShadow: T.shadow, overflowX: "auto", marginBottom: 14 }}>
+            <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 12 : 28, boxShadow: T.shadow, overflowX: "auto", marginBottom: 14 }}>
               <CalendarHeatmap practiceDays={practiceDays} year={heatmapYear} onYearChange={setHeatmapYear} />
             </div>
             {cards.length > 0 && (() => {
@@ -2295,22 +2426,22 @@ export default function VocabApp() {
                   stage: s,
                 }));
               return (
-                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 28, boxShadow: T.shadow, marginBottom: 14 }}>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 16 : 28, boxShadow: T.shadow, marginBottom: 14 }}>
                   <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
                     {t.stageBreakdown}
                   </div>
                   <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 24 }}>
                     {total} {total === 1 ? t.word : t.wordsPlural}
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 80 }}>
+                  <div style={{ display: "flex", flexDirection: mobile ? "column" : "row", alignItems: "center", justifyContent: "center", gap: mobile ? 24 : 80 }}>
                     <div style={{ flexShrink: 0 }}>
-                      <PieChart width={190} height={190}>
+                      <PieChart width={mobile ? 160 : 190} height={mobile ? 160 : 190}>
                         <Pie
                           data={chartData}
-                          cx={95}
-                          cy={95}
-                          innerRadius={62}
-                          outerRadius={88}
+                          cx={mobile ? 80 : 95}
+                          cy={mobile ? 80 : 95}
+                          innerRadius={mobile ? 50 : 62}
+                          outerRadius={mobile ? 74 : 88}
                           paddingAngle={1}
                           dataKey="value"
                           nameKey="name"
@@ -2510,7 +2641,7 @@ export default function VocabApp() {
         )}
         {view === "settings" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 28, boxShadow: T.shadow }}>
+            <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 18 : 28, boxShadow: T.shadow }}>
               <div style={{ fontFamily: font.display, fontSize: 20, fontWeight: 700, color: T.text, marginBottom: 28, textTransform: "capitalize" }}>
                 {t.settingsTitle}
               </div>
@@ -2522,13 +2653,13 @@ export default function VocabApp() {
                   <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12 }}>
                     {t.dailyGoalDesc}
                   </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     {[5, 10, 20, 30, 50].map((n) => (
                       <button
                         key={n}
                         onClick={() => saveSettings({ ...settings, dailyGoal: n })}
                         style={{
-                          padding: "8px 16px",
+                          padding: mobile ? "8px 12px" : "8px 16px",
                           background: settings.dailyGoal === n ? T.accent : "transparent",
                           border: `1px solid ${settings.dailyGoal === n ? T.accent : T.border}`,
                           borderRadius: T.radiusSm,
