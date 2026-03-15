@@ -235,6 +235,14 @@ const parseImportText = (text) => {
 };
 // ─── Date Helpers ───
 const today = () => new Date().toISOString().split("T")[0];
+const normalizeDate = (v) => {
+  if (!v) return "";
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+  return "";
+};
 const getDaysInYear = (year) => {
   const start = new Date(year, 0, 1);
   const end = new Date(year, 11, 31);
@@ -1941,9 +1949,9 @@ const GSheets = {
       stability: Number(c.stability) || 0,
       difficulty: Number(c.difficulty) || 0,
       reps: Number(c.reps) || 0,
-      dueDate: c.dueDate || today(),
-      lastReview: c.lastReview || null,
-      created: c.created || today(),
+      dueDate: normalizeDate(c.dueDate) || today(),
+      lastReview: normalizeDate(c.lastReview) || null,
+      created: normalizeDate(c.created) || today(),
     }));
   },
   // Read practice days metadata
