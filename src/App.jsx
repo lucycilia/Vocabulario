@@ -2010,6 +2010,12 @@ export default function VocabApp() {
   const [syncError, setSyncError] = useState("");
   const [lastSynced, setLastSynced] = useState(null);
   const [sheetsSaved, setSheetsSaved] = useState(false);
+  const dirtyRef = useRef(false);
+  const syncTimerRef = useRef(null);
+  const cardsRef = useRef(cards);
+  const practiceDaysRef = useRef(practiceDays);
+  useEffect(() => { cardsRef.current = cards; }, [cards]);
+  useEffect(() => { practiceDaysRef.current = practiceDays; }, [practiceDays]);
   T = themes[settings.theme] || themes.light;
   t = i18n[settings.lang] || i18n["pt-BR"];
   const doSync = useCallback(async (newCards, newDays, scriptUrl) => {
@@ -2026,6 +2032,15 @@ export default function VocabApp() {
       setSyncError(e.message);
     }
   }, []);
+  const scheduleSyncIfDirty = useCallback(() => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      if (dirtyRef.current && settings.scriptUrl) {
+        doSync(cardsRef.current, practiceDaysRef.current, settings.scriptUrl);
+        dirtyRef.current = false;
+      }
+    }, 60000);
+  }, [settings.scriptUrl, doSync]);
   useEffect(() => {
     const load = async () => {
       let savedSettings = null;
@@ -2066,18 +2081,36 @@ export default function VocabApp() {
     if ("speechSynthesis" in window) { window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices(); }
   }, []);
   useEffect(() => {
-    if (!settings.scriptUrl) return;
-    const interval = setInterval(() => {
-      doSync(cards, practiceDays, settings.scriptUrl);
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [cards, practiceDays, settings.scriptUrl, doSync]);
+    const flushSync = () => {
+      if (dirtyRef.current && settings.scriptUrl) {
+        const payload = JSON.stringify({ action: "writeCards", cards: cardsRef.current });
+        navigator.sendBeacon(settings.scriptUrl, payload);
+        const metaPayload = JSON.stringify({ action: "writeMeta", practiceDays: JSON.stringify(practiceDaysRef.current) });
+        navigator.sendBeacon(settings.scriptUrl, metaPayload);
+        dirtyRef.current = false;
+      }
+    };
+    const handleVisChange = () => {
+      if (document.visibilityState === "hidden" && dirtyRef.current && settings.scriptUrl) {
+        doSync(cardsRef.current, practiceDaysRef.current, settings.scriptUrl);
+        dirtyRef.current = false;
+      }
+    };
+    window.addEventListener("beforeunload", flushSync);
+    document.addEventListener("visibilitychange", handleVisChange);
+    return () => {
+      window.removeEventListener("beforeunload", flushSync);
+      document.removeEventListener("visibilitychange", handleVisChange);
+    };
+  }, [settings.scriptUrl, doSync]);
   const manualSync = useCallback(async () => {
     if (!settings.scriptUrl) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     setSyncStatus("syncing");
     try {
       await GSheets.writeCards(settings.scriptUrl, cards);
       await GSheets.writeMeta(settings.scriptUrl, practiceDays);
+      dirtyRef.current = false;
       setSyncStatus("synced");
       setLastSynced(new Date().toLocaleTimeString());
       setSyncError("");
@@ -2091,11 +2124,11 @@ export default function VocabApp() {
       await window.storage.set("vocab-cards", JSON.stringify(newCards));
       await window.storage.set("vocab-practice-days", JSON.stringify(newDays));
     } catch (e) { console.error("Local save failed:", e); }
-    const s = settings;
-    if (s.scriptUrl) {
-      doSync(newCards, newDays, s.scriptUrl);
+    if (settings.scriptUrl) {
+      dirtyRef.current = true;
+      scheduleSyncIfDirty();
     }
-  }, [settings, doSync]);
+  }, [settings, scheduleSyncIfDirty]);
   const saveSettings = useCallback(async (newSettings) => {
     setSettings(newSettings);
     try { await window.storage.set("vocab-settings", JSON.stringify(newSettings)); } catch (e) { console.error("Settings save failed:", e); }
