@@ -830,7 +830,7 @@ function AddCardForm({ onAdd, onCancel }) {
             background: canSubmit ? T.accent : T.bgInput,
             border: "none",
             borderRadius: T.radiusSm,
-            color: canSubmit ? "#fff" : T.textPlaceholder,
+            color: canSubmit ? T.bg : T.textPlaceholder,
             fontFamily: font.body,
             fontSize: 14,
             fontWeight: 600,
@@ -1555,7 +1555,7 @@ function ImportPanel({ onImport, existingCount }) {
                 padding: "9px 22px",
                 background: selected.size > 0 ? T.accent : T.bgInput,
                 border: "none", borderRadius: T.radiusSm,
-                color: selected.size > 0 ? "#fff" : T.textPlaceholder,
+                color: selected.size > 0 ? T.bg : T.textPlaceholder,
                 fontFamily: font.body, fontSize: 13, fontWeight: 600,
                 cursor: selected.size > 0 ? "pointer" : "default",
                 letterSpacing: 0.3,
@@ -1679,7 +1679,7 @@ function ImportPanel({ onImport, existingCount }) {
             width: 32, height: 32, borderRadius: 16, background: T.success,
             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
           }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.bg} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"/>
             </svg>
           </div>
@@ -1778,7 +1778,7 @@ Start the conversation naturally in Portuguese, using one or two of the due word
         </div>
         <div style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, color: T.text, marginBottom: 8 }}>{t.chatNoKey}</div>
         <div style={{ fontFamily: font.body, fontSize: 14, color: T.textTertiary, marginBottom: 28, lineHeight: 1.6, maxWidth: 340, margin: "0 auto 28px" }}>{t.chatNoKeyDesc}</div>
-        <button onClick={onGoToSettings} style={{ padding: "11px 28px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: "#fff", fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3 }}>
+        <button onClick={onGoToSettings} style={{ padding: "11px 28px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3 }}>
           {t.chatGoToSettings}
         </button>
       </div>
@@ -1813,7 +1813,7 @@ Start the conversation naturally in Portuguese, using one or two of the due word
             setStarted(true);
             await sendToAPI([], true);
           }}
-          style={{ padding: "13px 36px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: "#fff", fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3 }}
+          style={{ padding: "13px 36px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3 }}
         >
           {t.chatStart}
         </button>
@@ -1869,7 +1869,7 @@ Start the conversation naturally in Portuguese, using one or two of the due word
               borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
               background: msg.role === "user" ? T.accent : T.bgCard,
               border: msg.role === "user" ? "none" : `1px solid ${T.border}`,
-              color: msg.role === "user" ? "#fff" : (msg.isError ? T.danger : T.text),
+              color: msg.role === "user" ? T.bg : (msg.isError ? T.danger : T.text),
               fontFamily: font.body,
               fontSize: 14,
               lineHeight: 1.65,
@@ -1920,7 +1920,7 @@ Start the conversation naturally in Portuguese, using one or two of the due word
             background: !loading && input.trim() ? T.accent : T.bgInput,
             border: "none",
             borderRadius: T.radiusSm,
-            color: !loading && input.trim() ? "#fff" : T.textPlaceholder,
+            color: !loading && input.trim() ? T.bg : T.textPlaceholder,
             fontFamily: font.body,
             fontSize: 14,
             fontWeight: 600,
@@ -2432,7 +2432,7 @@ export default function VocabApp() {
                 {cards.length === 0 && (
                   <button onClick={() => { setView("words"); setShowAddInline(true); }} style={{
                     padding: "13px 32px", background: T.accent, border: "none", borderRadius: T.radiusSm,
-                    color: "#fff", fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3,
+                    color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3,
                   }}>
                     adicionar primeira palavra
                   </button>
@@ -2480,7 +2480,7 @@ export default function VocabApp() {
                     padding: "9px 18px", background: T.accent,
                     border: "none",
                     borderRadius: T.radiusSm,
-                    color: settings.theme === "dark" ? T.bg : "#fff",
+                    color: T.bg,
                     fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
                   }}
                 >
@@ -2826,7 +2826,7 @@ export default function VocabApp() {
                           background: settings.dailyGoal === n ? T.accent : "transparent",
                           border: `1px solid ${settings.dailyGoal === n ? T.accent : T.border}`,
                           borderRadius: T.radiusSm,
-                          color: settings.dailyGoal === n ? (settings.theme === "dark" ? "#111614" : "#fff") : T.textSecondary,
+                          color: settings.dailyGoal === n ? T.bg : T.textSecondary,
                           fontFamily: font.body, fontSize: 13, fontWeight: 500,
                           cursor: "pointer", transition: "all 0.15s",
                         }}
@@ -3085,7 +3085,7 @@ export default function VocabApp() {
                           flex: 1, padding: "11px 20px",
                           background: sheetsSaved ? T.keywordBg : (scriptUrlInput.trim() ? T.accent : T.bgInput),
                           border: "none", borderRadius: T.radiusSm,
-                          color: sheetsSaved ? T.success : (scriptUrlInput.trim() ? "#fff" : T.textPlaceholder),
+                          color: sheetsSaved ? T.success : (scriptUrlInput.trim() ? T.bg : T.textPlaceholder),
                           fontFamily: font.body, fontSize: 13, fontWeight: 600,
                           cursor: scriptUrlInput.trim() ? "pointer" : "default",
                           transition: "all 0.2s", letterSpacing: 0.3,
