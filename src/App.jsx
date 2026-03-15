@@ -422,18 +422,12 @@ const i18n = {
     apiKeyPlaceholder: "AIza...",
     apiKeySaved: "Chave salva ✓",
     sheetsSync: "Sincronização Google Sheets",
-    sheetsSyncDesc: "Mantenha seus cartões sincronizados em todos os dispositivos via Google Sheets.",
-    sheetsApiKey: "Chave de API Google",
-    sheetsApiKeyDesc: "Chave da Google Cloud Console com acesso à Sheets API.",
-    sheetsId: "ID da Planilha",
-    sheetsIdDesc: "O ID longo da URL da sua planilha Google Sheets.",
-    sheetsIdPlaceholder: "1BYPJsXVg4lA_P_x1fU051LM0edVLcY8M7bVUi-uVnUY",
+    sheetsSyncDesc: "Mantenha seus cartões sincronizados em todos os dispositivos via Google Sheets. Cole a URL do Apps Script abaixo.",
     sheetsSave: "Salvar e sincronizar",
     sheetsSyncing: "sincronizando...",
     sheetsSynced: "Sincronizado ✓",
     sheetsError: "Erro de sincronização",
     sheetsLastSync: "Última sincronização",
-    sheetsPushAll: "Enviar todos os cartões",
   },
   en: {
     practice: "practice",
@@ -551,18 +545,12 @@ const i18n = {
     apiKeyPlaceholder: "AIza...",
     apiKeySaved: "Key saved ✓",
     sheetsSync: "Google Sheets Sync",
-    sheetsSyncDesc: "Keep your cards synced across all devices via Google Sheets.",
-    sheetsApiKey: "Google API Key",
-    sheetsApiKeyDesc: "Key from Google Cloud Console with Sheets API access.",
-    sheetsId: "Sheet ID",
-    sheetsIdDesc: "The long ID from your Google Sheet's URL.",
-    sheetsIdPlaceholder: "1BYPJsXVg4lA_P_x1fU051LM0edVLcY8M7bVUi-uVnUY",
+    sheetsSyncDesc: "Keep your cards synced across all devices via Google Sheets. Paste your Apps Script URL below.",
     sheetsSave: "Save & sync",
     sheetsSyncing: "syncing...",
     sheetsSynced: "Synced ✓",
     sheetsError: "Sync error",
     sheetsLastSync: "Last synced",
-    sheetsPushAll: "Push all cards",
   },
 };
 let t = i18n["pt-BR"];
@@ -1812,120 +1800,52 @@ Start the conversation naturally in Portuguese, using one or two of the due word
     </div>
   );
 }
-// ─── Google Sheets Sync ───
-const SHEET_CARDS = "cards";
-const SHEET_META = "meta";
-const CARDS_RANGE = `${SHEET_CARDS}!A:M`;
-const META_RANGE = `${SHEET_META}!A:B`;
-const cardToRow = (c) => [
-  c.id, c.word, c.translation, c.phrase || "", c.keywordStart ?? 0, c.keywordEnd ?? 0,
-  c.stability ?? 0, c.difficulty ?? 0, c.reps ?? 0, c.dueDate || "", c.lastReview || "", c.created || "",
-];
-const rowToCard = (row) => ({
-  id: row[0] || "",
-  word: row[1] || "",
-  translation: row[2] || "",
-  phrase: row[3] || "",
-  keywordStart: Number(row[4]) || 0,
-  keywordEnd: Number(row[5]) || 0,
-  stability: Number(row[6]) || 0,
-  difficulty: Number(row[7]) || 0,
-  reps: Number(row[8]) || 0,
-  dueDate: row[9] || today(),
-  lastReview: row[10] || null,
-  created: row[11] || today(),
-});
+// ─── Google Sheets Sync (via Apps Script proxy) ───
 const GSheets = {
-  base: (sheetId, apiKey) =>
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}`,
-  ensureSheets: async (sheetId, apiKey) => {
-    const metaRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?key=${apiKey}`
-    );
-    if (!metaRes.ok) throw new Error(`Google API error ${metaRes.status}: check your API key and Sheet ID`);
-    const meta = await metaRes.json();
-    const existingSheets = meta.sheets.map(s => s.properties.title);
-    const requests = [];
-    if (!existingSheets.includes(SHEET_CARDS)) {
-      requests.push({ addSheet: { properties: { title: SHEET_CARDS } } });
-    }
-    if (!existingSheets.includes(SHEET_META)) {
-      requests.push({ addSheet: { properties: { title: SHEET_META } } });
-    }
-    if (requests.length > 0) {
-      await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate?key=${apiKey}`,
-        { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ requests }) }
-      );
-    }
-    const headersRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${SHEET_CARDS}!A1?key=${apiKey}`
-    );
-    const headersData = await headersRes.json();
-    if (!headersData.values) {
-      await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${SHEET_CARDS}!A1:M1?valueInputOption=RAW&key=${apiKey}`,
-        { method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ values: [["id","word","translation","phrase","keywordStart","keywordEnd","stability","difficulty","reps","dueDate","lastReview","created"]] }) }
-      );
-    }
-    const metaHeadRes = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${SHEET_META}!A1?key=${apiKey}`
-    );
-    const metaHeadData = await metaHeadRes.json();
-    if (!metaHeadData.values) {
-      await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${SHEET_META}!A1:B1?valueInputOption=RAW&key=${apiKey}`,
-        { method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ values: [["key","value"]] }) }
-      );
-    }
-  },
-  readCards: async (sheetId, apiKey) => {
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${CARDS_RANGE}?key=${apiKey}`
-    );
-    if (!res.ok) throw new Error(`Read failed: ${res.status}`);
+  // Read all cards from the sheet
+  readCards: async (scriptUrl) => {
+    const res = await fetch(`${scriptUrl}?action=readCards`);
+    if (!res.ok) throw new Error(`Sync read failed: ${res.status}`);
     const data = await res.json();
-    const rows = (data.values || []).slice(1);
-    return rows.filter(r => r[0]).map(rowToCard);
+    if (data.error) throw new Error(data.error);
+    return (data.cards || []).map(c => ({
+      ...c,
+      keywordStart: Number(c.keywordStart) || 0,
+      keywordEnd: Number(c.keywordEnd) || 0,
+      stability: Number(c.stability) || 0,
+      difficulty: Number(c.difficulty) || 0,
+      reps: Number(c.reps) || 0,
+      dueDate: c.dueDate || today(),
+      lastReview: c.lastReview || null,
+      created: c.created || today(),
+    }));
   },
-  readMeta: async (sheetId, apiKey) => {
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${META_RANGE}?key=${apiKey}`
-    );
+  // Read practice days metadata
+  readMeta: async (scriptUrl) => {
+    const res = await fetch(`${scriptUrl}?action=readMeta`);
     if (!res.ok) return {};
     const data = await res.json();
-    const rows = (data.values || []).slice(1);
-    const meta = {};
-    rows.forEach(r => { if (r[0] && r[1]) meta[r[0]] = r[1]; });
-    try { return JSON.parse(meta.practiceDays || "{}"); } catch { return {}; }
+    if (data.error) return {};
+    try { return JSON.parse(data.practiceDays || "{}"); } catch { return {}; }
   },
-  writeCards: async (sheetId, apiKey, cards) => {
-    const values = [
-      ["id","word","translation","phrase","keywordStart","keywordEnd","stability","difficulty","reps","dueDate","lastReview","created"],
-      ...cards.map(cardToRow),
-    ];
-    const res = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${CARDS_RANGE}?valueInputOption=RAW&key=${apiKey}`,
-      { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values }) }
-    );
-    if (!res.ok) throw new Error(`Write failed: ${res.status}`);
-    const clearStart = cards.length + 2;
-    await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${SHEET_CARDS}!A${clearStart}:M10000:clear?key=${apiKey}`,
-      { method: "POST", headers: { "Content-Type": "application/json" } }
-    ).catch(() => {});
+  // Write all cards (full overwrite)
+  writeCards: async (scriptUrl, cards) => {
+    const res = await fetch(scriptUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "writeCards", cards }),
+    });
+    if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
   },
-  writeMeta: async (sheetId, apiKey, practiceDays) => {
-    const values = [["key","value"], ["practiceDays", JSON.stringify(practiceDays)]];
-    await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${META_RANGE}?valueInputOption=RAW&key=${apiKey}`,
-      { method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values }) }
-    ).catch(() => {});
+  // Write practice days metadata
+  writeMeta: async (scriptUrl, practiceDays) => {
+    await fetch(scriptUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "writeMeta", practiceDays: JSON.stringify(practiceDays) }),
+    }).catch(() => {});
   },
 };
 // ─── Main App ───
@@ -1946,25 +1866,23 @@ export default function VocabApp() {
     cardOrder: "due",
     lang: "pt-BR",
     apiKey: "",
-    sheetsApiKey: "",
-    sheetsId: "",
+    scriptUrl: "",
   });
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [keySaved, setKeySaved] = useState(false);
-  const [sheetsApiKeyInput, setSheetsApiKeyInput] = useState("");
-  const [sheetsIdInput, setSheetsIdInput] = useState("");
+  const [scriptUrlInput, setScriptUrlInput] = useState("");
   const [syncStatus, setSyncStatus] = useState("idle");
   const [syncError, setSyncError] = useState("");
   const [lastSynced, setLastSynced] = useState(null);
   const [sheetsSaved, setSheetsSaved] = useState(false);
   T = themes[settings.theme] || themes.light;
   t = i18n[settings.lang] || i18n["pt-BR"];
-  const doSync = useCallback(async (newCards, newDays, sheetsApiKey, sheetsId) => {
-    if (!sheetsApiKey || !sheetsId) return;
+  const doSync = useCallback(async (newCards, newDays, scriptUrl) => {
+    if (!scriptUrl) return;
     setSyncStatus("syncing");
     try {
-      await GSheets.writeCards(sheetsId, sheetsApiKey, newCards);
-      await GSheets.writeMeta(sheetsId, sheetsApiKey, newDays);
+      await GSheets.writeCards(scriptUrl, newCards);
+      await GSheets.writeMeta(scriptUrl, newDays);
       setSyncStatus("synced");
       setLastSynced(new Date().toLocaleTimeString());
       setSyncError("");
@@ -1982,18 +1900,15 @@ export default function VocabApp() {
           savedSettings = JSON.parse(r.value);
           setSettings((prev) => ({ ...prev, ...savedSettings }));
           if (savedSettings.apiKey) setApiKeyInput(savedSettings.apiKey);
-          if (savedSettings.sheetsApiKey) setSheetsApiKeyInput(savedSettings.sheetsApiKey);
-          if (savedSettings.sheetsId) setSheetsIdInput(savedSettings.sheetsId);
+          if (savedSettings.scriptUrl) setScriptUrlInput(savedSettings.scriptUrl);
         }
       } catch {}
-      const gKey = savedSettings?.sheetsApiKey || "";
-      const gId = savedSettings?.sheetsId || "";
-      if (gKey && gId) {
+      const sUrl = savedSettings?.scriptUrl || "";
+      if (sUrl) {
         setSyncStatus("syncing");
         try {
-          await GSheets.ensureSheets(gId, gKey);
-          const sheetCards = await GSheets.readCards(gId, gKey);
-          const sheetDays = await GSheets.readMeta(gId, gKey);
+          const sheetCards = await GSheets.readCards(sUrl);
+          const sheetDays = await GSheets.readMeta(sUrl);
           setCards(sheetCards);
           setPracticeDays(sheetDays);
           await window.storage.set("vocab-cards", JSON.stringify(sheetCards)).catch(() => {});
@@ -2016,19 +1931,18 @@ export default function VocabApp() {
     if ("speechSynthesis" in window) { window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices(); }
   }, []);
   useEffect(() => {
-    if (!settings.sheetsApiKey || !settings.sheetsId) return;
+    if (!settings.scriptUrl) return;
     const interval = setInterval(() => {
-      doSync(cards, practiceDays, settings.sheetsApiKey, settings.sheetsId);
+      doSync(cards, practiceDays, settings.scriptUrl);
     }, 60000);
     return () => clearInterval(interval);
-  }, [cards, practiceDays, settings.sheetsApiKey, settings.sheetsId, doSync]);
+  }, [cards, practiceDays, settings.scriptUrl, doSync]);
   const manualSync = useCallback(async () => {
-    if (!settings.sheetsApiKey || !settings.sheetsId) return;
+    if (!settings.scriptUrl) return;
     setSyncStatus("syncing");
     try {
-      await GSheets.ensureSheets(settings.sheetsId, settings.sheetsApiKey);
-      await GSheets.writeCards(settings.sheetsId, settings.sheetsApiKey, cards);
-      await GSheets.writeMeta(settings.sheetsId, settings.sheetsApiKey, practiceDays);
+      await GSheets.writeCards(settings.scriptUrl, cards);
+      await GSheets.writeMeta(settings.scriptUrl, practiceDays);
       setSyncStatus("synced");
       setLastSynced(new Date().toLocaleTimeString());
       setSyncError("");
@@ -2036,15 +1950,15 @@ export default function VocabApp() {
       setSyncStatus("error");
       setSyncError(e.message);
     }
-  }, [cards, practiceDays, settings.sheetsApiKey, settings.sheetsId]);
+  }, [cards, practiceDays, settings.scriptUrl]);
   const save = useCallback(async (newCards, newDays) => {
     try {
       await window.storage.set("vocab-cards", JSON.stringify(newCards));
       await window.storage.set("vocab-practice-days", JSON.stringify(newDays));
     } catch (e) { console.error("Local save failed:", e); }
     const s = settings;
-    if (s.sheetsApiKey && s.sheetsId) {
-      doSync(newCards, newDays, s.sheetsApiKey, s.sheetsId);
+    if (s.scriptUrl) {
+      doSync(newCards, newDays, s.scriptUrl);
     }
   }, [settings, doSync]);
   const saveSettings = useCallback(async (newSettings) => {
@@ -2121,9 +2035,9 @@ export default function VocabApp() {
             vocabulário
           </h1>
           <button
-            onClick={() => settings.sheetsApiKey && settings.sheetsId ? manualSync() : setView("settings")}
+            onClick={() => settings.scriptUrl ? manualSync() : setView("settings")}
             disabled={syncStatus === "syncing"}
-            title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.sheetsApiKey || !settings.sheetsId ? "Configure Google Sheets sync in settings" : ""}
+            title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
             style={{
               display: "flex", alignItems: "center", gap: 7,
               padding: "6px 12px", borderRadius: 20,
@@ -2825,28 +2739,13 @@ export default function VocabApp() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div>
                       <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>
-                        {t.sheetsApiKey}
-                      </div>
-                      <input
-                        type="password"
-                        value={sheetsApiKeyInput}
-                        onChange={(e) => { setSheetsApiKeyInput(e.target.value); setSheetsSaved(false); }}
-                        placeholder="AIzaSy..."
-                        autoComplete="off"
-                        style={{ width: "100%", padding: "11px 14px", background: T.bgInput, border: "1px solid transparent", borderRadius: T.radiusSm, color: T.text, fontFamily: font.mono, fontSize: 13, outline: "none", boxSizing: "border-box", transition: "border-color 0.2s" }}
-                        onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
-                        onBlur={(e) => { e.target.style.borderColor = "transparent"; }}
-                      />
-                    </div>
-                    <div>
-                      <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>
-                        {t.sheetsId}
+                        APPS SCRIPT URL
                       </div>
                       <input
                         type="text"
-                        value={sheetsIdInput}
-                        onChange={(e) => { setSheetsIdInput(e.target.value); setSheetsSaved(false); }}
-                        placeholder={t.sheetsIdPlaceholder}
+                        value={scriptUrlInput}
+                        onChange={(e) => { setScriptUrlInput(e.target.value); setSheetsSaved(false); }}
+                        placeholder="https://script.google.com/macros/s/.../exec"
                         autoComplete="off"
                         style={{ width: "100%", padding: "11px 14px", background: T.bgInput, border: "1px solid transparent", borderRadius: T.radiusSm, color: T.text, fontFamily: font.mono, fontSize: 12, outline: "none", boxSizing: "border-box", transition: "border-color 0.2s" }}
                         onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
@@ -2856,16 +2755,15 @@ export default function VocabApp() {
                     <div style={{ display: "flex", gap: 10 }}>
                       <button
                         onClick={async () => {
-                          const newSettings = { ...settings, sheetsApiKey: sheetsApiKeyInput.trim(), sheetsId: sheetsIdInput.trim() };
+                          const newSettings = { ...settings, scriptUrl: scriptUrlInput.trim() };
                           await saveSettings(newSettings);
                           setSheetsSaved(true);
                           setTimeout(() => setSheetsSaved(false), 2500);
-                          if (sheetsApiKeyInput.trim() && sheetsIdInput.trim()) {
+                          if (scriptUrlInput.trim()) {
                             setSyncStatus("syncing");
                             try {
-                              await GSheets.ensureSheets(sheetsIdInput.trim(), sheetsApiKeyInput.trim());
-                              await GSheets.writeCards(sheetsIdInput.trim(), sheetsApiKeyInput.trim(), cards);
-                              await GSheets.writeMeta(sheetsIdInput.trim(), sheetsApiKeyInput.trim(), practiceDays);
+                              await GSheets.writeCards(scriptUrlInput.trim(), cards);
+                              await GSheets.writeMeta(scriptUrlInput.trim(), practiceDays);
                               setSyncStatus("synced");
                               setLastSynced(new Date().toLocaleTimeString());
                               setSyncError("");
@@ -2875,26 +2773,26 @@ export default function VocabApp() {
                             }
                           }
                         }}
-                        disabled={!sheetsApiKeyInput.trim() || !sheetsIdInput.trim()}
+                        disabled={!scriptUrlInput.trim()}
                         style={{
                           flex: 1, padding: "11px 20px",
-                          background: sheetsSaved ? T.keywordBg : (sheetsApiKeyInput.trim() && sheetsIdInput.trim() ? T.accent : T.bgInput),
+                          background: sheetsSaved ? T.keywordBg : (scriptUrlInput.trim() ? T.accent : T.bgInput),
                           border: "none", borderRadius: T.radiusSm,
-                          color: sheetsSaved ? T.success : (sheetsApiKeyInput.trim() && sheetsIdInput.trim() ? "#fff" : T.textPlaceholder),
+                          color: sheetsSaved ? T.success : (scriptUrlInput.trim() ? "#fff" : T.textPlaceholder),
                           fontFamily: font.body, fontSize: 13, fontWeight: 600,
-                          cursor: sheetsApiKeyInput.trim() && sheetsIdInput.trim() ? "pointer" : "default",
+                          cursor: scriptUrlInput.trim() ? "pointer" : "default",
                           transition: "all 0.2s", letterSpacing: 0.3,
                         }}
                       >
                         {sheetsSaved ? t.sheetsSynced : t.sheetsSave}
                       </button>
-                      {settings.sheetsApiKey && settings.sheetsId && (
+                      {settings.scriptUrl && (
                         <button
                           onClick={async () => {
                             setSyncStatus("syncing");
                             try {
-                              const sheetCards = await GSheets.readCards(settings.sheetsId, settings.sheetsApiKey);
-                              const sheetDays = await GSheets.readMeta(settings.sheetsId, settings.sheetsApiKey);
+                              const sheetCards = await GSheets.readCards(settings.scriptUrl);
+                              const sheetDays = await GSheets.readMeta(settings.scriptUrl);
                               setCards(sheetCards);
                               setPracticeDays(sheetDays);
                               await window.storage.set("vocab-cards", JSON.stringify(sheetCards)).catch(() => {});
