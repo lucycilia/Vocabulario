@@ -2307,7 +2307,7 @@ export default function VocabApp() {
         .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
       <div style={{ padding: mobile ? "20px 16px 0" : "36px 32px 0", maxWidth: 760, margin: "0 auto" }}>
-        <div style={{ marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h1 style={{ fontFamily: font.display, fontSize: 28, fontWeight: 700, color: T.text, margin: 0, letterSpacing: -0.5, textTransform: "capitalize" }}>
             vocabulário
           </h1>
