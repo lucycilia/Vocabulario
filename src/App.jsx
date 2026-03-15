@@ -94,6 +94,7 @@ const FSRS = {
     dueDate: new Date().toISOString().split("T")[0],
     lastReview: null,
     created: new Date().toISOString().split("T")[0],
+    modifiedAt: Date.now(),
   }),
   // Review a card with a grade (1=Forgot, 2=Hard, 3=Good, 4=Easy)
   review: (card, grade) => {
@@ -126,6 +127,7 @@ const FSRS = {
       reps: reps + 1,
       dueDate: due.toISOString().split("T")[0],
       lastReview: new Date().toISOString().split("T")[0],
+      modifiedAt: Date.now(),
     };
   },
 };
@@ -1952,15 +1954,20 @@ const GSheets = {
       dueDate: normalizeDate(c.dueDate) || today(),
       lastReview: normalizeDate(c.lastReview) || null,
       created: normalizeDate(c.created) || today(),
+      modifiedAt: Number(c.modifiedAt) || 0,
     }));
   },
-  // Read practice days metadata
+  // Read practice days + deleted cards metadata
   readMeta: async (scriptUrl) => {
     const res = await fetch(`${scriptUrl}?action=readMeta`);
-    if (!res.ok) return {};
+    if (!res.ok) return { practiceDays: {}, deletedCards: {} };
     const data = await res.json();
-    if (data.error) return {};
-    try { return JSON.parse(data.practiceDays || "{}"); } catch { return {}; }
+    if (data.error) return { practiceDays: {}, deletedCards: {} };
+    let practiceDays = {};
+    let deletedCards = {};
+    try { practiceDays = JSON.parse(data.practiceDays || "{}"); } catch {}
+    try { deletedCards = JSON.parse(data.deletedCards || "{}"); } catch {}
+    return { practiceDays, deletedCards };
   },
   // Write all cards (full overwrite)
   writeCards: async (scriptUrl, cards) => {
@@ -1973,14 +1980,55 @@ const GSheets = {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
   },
-  // Write practice days metadata
-  writeMeta: async (scriptUrl, practiceDays) => {
+  // Write practice days + deleted cards metadata
+  writeMeta: async (scriptUrl, practiceDays, deletedCards) => {
     await fetch(scriptUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action: "writeMeta", practiceDays: JSON.stringify(practiceDays) }),
+      body: JSON.stringify({
+        action: "writeMeta",
+        practiceDays: JSON.stringify(practiceDays),
+        deletedCards: JSON.stringify(deletedCards || {}),
+      }),
     }).catch(() => {});
   },
+};
+// ─── Merge Logic ───
+const mergeCards = (localCards, remoteCards, localDeleted, remoteDeleted) => {
+  const merged = {};
+  const mergedDeleted = {};
+  // Combine deletions, keep newer timestamp per ID
+  for (const [id, t] of Object.entries(localDeleted || {})) mergedDeleted[id] = Math.max(mergedDeleted[id] || 0, t);
+  for (const [id, t] of Object.entries(remoteDeleted || {})) mergedDeleted[id] = Math.max(mergedDeleted[id] || 0, t);
+  // Index all cards by ID, keep newer version
+  for (const c of localCards) merged[c.id] = c;
+  for (const c of remoteCards) {
+    if (!merged[c.id] || (c.modifiedAt || 0) > (merged[c.id].modifiedAt || 0)) {
+      merged[c.id] = c;
+    }
+  }
+  // Apply deletions: delete if tombstone is newer than card
+  for (const [id, delTime] of Object.entries(mergedDeleted)) {
+    if (merged[id] && (merged[id].modifiedAt || 0) <= delTime) {
+      delete merged[id];
+    } else if (merged[id]) {
+      // Card modified after deletion — keep card, remove tombstone
+      delete mergedDeleted[id];
+    }
+  }
+  // Prune tombstones older than 30 days
+  const cutoff = Date.now() - 30 * 86400000;
+  for (const [id, delTime] of Object.entries(mergedDeleted)) {
+    if (delTime < cutoff) delete mergedDeleted[id];
+  }
+  return { cards: Object.values(merged), deleted: mergedDeleted };
+};
+const mergePracticeDays = (local, remote) => {
+  const merged = { ...local };
+  for (const [day, count] of Object.entries(remote || {})) {
+    merged[day] = Math.max(merged[day] || 0, count);
+  }
+  return merged;
 };
 // ─── Main App ───
 export default function VocabApp() {
@@ -1993,6 +2041,7 @@ export default function VocabApp() {
   const [showAddInline, setShowAddInline] = useState(false);
   const [showImportInline, setShowImportInline] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [deletedCards, setDeletedCards] = useState({});
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState("asc");
   const [activityRange, setActivityRange] = useState("month");
@@ -2015,16 +2064,35 @@ export default function VocabApp() {
   const syncTimerRef = useRef(null);
   const cardsRef = useRef(cards);
   const practiceDaysRef = useRef(practiceDays);
+  const deletedCardsRef = useRef(deletedCards);
   useEffect(() => { cardsRef.current = cards; }, [cards]);
   useEffect(() => { practiceDaysRef.current = practiceDays; }, [practiceDays]);
+  useEffect(() => { deletedCardsRef.current = deletedCards; }, [deletedCards]);
   T = themes[settings.theme] || themes.light;
   t = i18n[settings.lang] || i18n["pt-BR"];
-  const doSync = useCallback(async (newCards, newDays, scriptUrl) => {
+  const doSync = useCallback(async (localCards, localDays, scriptUrl) => {
     if (!scriptUrl) return;
     setSyncStatus("syncing");
     try {
-      await GSheets.writeCards(scriptUrl, newCards);
-      await GSheets.writeMeta(scriptUrl, newDays);
+      // Read remote state
+      const remoteCards = await GSheets.readCards(scriptUrl);
+      const remoteMeta = await GSheets.readMeta(scriptUrl);
+      // Merge
+      const { cards: mergedCards, deleted: mergedDeleted } = mergeCards(
+        localCards, remoteCards,
+        deletedCardsRef.current, remoteMeta.deletedCards || {}
+      );
+      const mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
+      // Write merged result
+      await GSheets.writeCards(scriptUrl, mergedCards);
+      await GSheets.writeMeta(scriptUrl, mergedDays, mergedDeleted);
+      // Update local state
+      setCards(mergedCards);
+      setPracticeDays(mergedDays);
+      setDeletedCards(mergedDeleted);
+      await window.storage.set("vocab-cards", JSON.stringify(mergedCards)).catch(() => {});
+      await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
+      await window.storage.set("vocab-deleted", JSON.stringify(mergedDeleted)).catch(() => {});
       setSyncStatus("synced");
       setLastSynced(new Date().toLocaleTimeString());
       setSyncError("");
@@ -2054,27 +2122,47 @@ export default function VocabApp() {
           if (savedSettings.scriptUrl) setScriptUrlInput(savedSettings.scriptUrl);
         }
       } catch {}
+      // Load local data
+      let localCards = [];
+      let localDays = {};
+      let localDeleted = {};
+      try { const r = await window.storage.get("vocab-cards"); if (r) localCards = JSON.parse(r.value); } catch {}
+      try { const r = await window.storage.get("vocab-practice-days"); if (r) localDays = JSON.parse(r.value); } catch {}
+      try { const r = await window.storage.get("vocab-deleted"); if (r) localDeleted = JSON.parse(r.value); } catch {}
       const sUrl = savedSettings?.scriptUrl || "";
       if (sUrl) {
         setSyncStatus("syncing");
         try {
-          const sheetCards = await GSheets.readCards(sUrl);
-          const sheetDays = await GSheets.readMeta(sUrl);
-          setCards(sheetCards);
-          setPracticeDays(sheetDays);
-          await window.storage.set("vocab-cards", JSON.stringify(sheetCards)).catch(() => {});
-          await window.storage.set("vocab-practice-days", JSON.stringify(sheetDays)).catch(() => {});
+          const remoteCards = await GSheets.readCards(sUrl);
+          const remoteMeta = await GSheets.readMeta(sUrl);
+          // Merge local + remote
+          const { cards: merged, deleted: mergedDel } = mergeCards(
+            localCards, remoteCards, localDeleted, remoteMeta.deletedCards || {}
+          );
+          const mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
+          setCards(merged);
+          setPracticeDays(mergedDays);
+          setDeletedCards(mergedDel);
+          // Write merged result back to both
+          await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
+          await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
+          await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
+          await GSheets.writeCards(sUrl, merged);
+          await GSheets.writeMeta(sUrl, mergedDays, mergedDel);
           setSyncStatus("synced");
           setLastSynced(new Date().toLocaleTimeString());
         } catch (e) {
           setSyncStatus("error");
           setSyncError(e.message);
-          try { const r = await window.storage.get("vocab-cards"); if (r) setCards(JSON.parse(r.value)); } catch {}
-          try { const r = await window.storage.get("vocab-practice-days"); if (r) setPracticeDays(JSON.parse(r.value)); } catch {}
+          // Fallback to local data
+          setCards(localCards);
+          setPracticeDays(localDays);
+          setDeletedCards(localDeleted);
         }
       } else {
-        try { const r = await window.storage.get("vocab-cards"); if (r) setCards(JSON.parse(r.value)); } catch {}
-        try { const r = await window.storage.get("vocab-practice-days"); if (r) setPracticeDays(JSON.parse(r.value)); } catch {}
+        setCards(localCards);
+        setPracticeDays(localDays);
+        setDeletedCards(localDeleted);
       }
       setLoaded(true);
     };
@@ -2086,7 +2174,7 @@ export default function VocabApp() {
       if (dirtyRef.current && settings.scriptUrl) {
         const payload = JSON.stringify({ action: "writeCards", cards: cardsRef.current });
         navigator.sendBeacon(settings.scriptUrl, payload);
-        const metaPayload = JSON.stringify({ action: "writeMeta", practiceDays: JSON.stringify(practiceDaysRef.current) });
+        const metaPayload = JSON.stringify({ action: "writeMeta", practiceDays: JSON.stringify(practiceDaysRef.current), deletedCards: JSON.stringify(deletedCardsRef.current) });
         navigator.sendBeacon(settings.scriptUrl, metaPayload);
         dirtyRef.current = false;
       }
@@ -2109,8 +2197,20 @@ export default function VocabApp() {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     setSyncStatus("syncing");
     try {
-      await GSheets.writeCards(settings.scriptUrl, cards);
-      await GSheets.writeMeta(settings.scriptUrl, practiceDays);
+      const remoteCards = await GSheets.readCards(settings.scriptUrl);
+      const remoteMeta = await GSheets.readMeta(settings.scriptUrl);
+      const { cards: merged, deleted: mergedDel } = mergeCards(
+        cards, remoteCards, deletedCards, remoteMeta.deletedCards || {}
+      );
+      const mergedDays = mergePracticeDays(practiceDays, remoteMeta.practiceDays || {});
+      await GSheets.writeCards(settings.scriptUrl, merged);
+      await GSheets.writeMeta(settings.scriptUrl, mergedDays, mergedDel);
+      setCards(merged);
+      setPracticeDays(mergedDays);
+      setDeletedCards(mergedDel);
+      await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
+      await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
+      await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
       dirtyRef.current = false;
       setSyncStatus("synced");
       setLastSynced(new Date().toLocaleTimeString());
@@ -2119,7 +2219,7 @@ export default function VocabApp() {
       setSyncStatus("error");
       setSyncError(e.message);
     }
-  }, [cards, practiceDays, settings.scriptUrl]);
+  }, [cards, practiceDays, deletedCards, settings.scriptUrl]);
   const save = useCallback(async (newCards, newDays) => {
     try {
       await window.storage.set("vocab-cards", JSON.stringify(newCards));
@@ -2136,8 +2236,15 @@ export default function VocabApp() {
   }, []);
   const addCard = (card) => { const nc = [...cards, card]; setCards(nc); save(nc, practiceDays); setShowAddInline(false); };
   const addCards = (newCards) => { const nc = [...cards, ...newCards]; setCards(nc); save(nc, practiceDays); };
-  const deleteCard = (id) => { const nc = cards.filter((c) => c.id !== id); setCards(nc); save(nc, practiceDays); };
-  const updateCard = (id, updated) => { const nc = cards.map((c) => c.id === id ? { ...c, ...updated } : c); setCards(nc); save(nc, practiceDays); };
+  const deleteCard = (id) => {
+    const nc = cards.filter((c) => c.id !== id);
+    const nd = { ...deletedCards, [id]: Date.now() };
+    setCards(nc);
+    setDeletedCards(nd);
+    window.storage.set("vocab-deleted", JSON.stringify(nd)).catch(() => {});
+    save(nc, practiceDays);
+  };
+  const updateCard = (id, updated) => { const nc = cards.map((c) => c.id === id ? { ...c, ...updated, modifiedAt: Date.now() } : c); setCards(nc); save(nc, practiceDays); };
   const reviewCard = (id, quality) => {
     const nc = cards.map((c) => c.id === id ? FSRS.review(c, quality) : c);
     const nd = { ...practiceDays }; const t = today(); nd[t] = (nd[t] || 0) + 1;
@@ -2949,8 +3056,21 @@ export default function VocabApp() {
                           if (scriptUrlInput.trim()) {
                             setSyncStatus("syncing");
                             try {
-                              await GSheets.writeCards(scriptUrlInput.trim(), cards);
-                              await GSheets.writeMeta(scriptUrlInput.trim(), practiceDays);
+                              const sUrl = scriptUrlInput.trim();
+                              const remoteCards = await GSheets.readCards(sUrl);
+                              const remoteMeta = await GSheets.readMeta(sUrl);
+                              const { cards: merged, deleted: mergedDel } = mergeCards(
+                                cards, remoteCards, deletedCards, remoteMeta.deletedCards || {}
+                              );
+                              const mergedDays = mergePracticeDays(practiceDays, remoteMeta.practiceDays || {});
+                              await GSheets.writeCards(sUrl, merged);
+                              await GSheets.writeMeta(sUrl, mergedDays, mergedDel);
+                              setCards(merged);
+                              setPracticeDays(mergedDays);
+                              setDeletedCards(mergedDel);
+                              await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
+                              await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
+                              await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
                               setSyncStatus("synced");
                               setLastSynced(new Date().toLocaleTimeString());
                               setSyncError("");
@@ -2978,12 +3098,18 @@ export default function VocabApp() {
                           onClick={async () => {
                             setSyncStatus("syncing");
                             try {
-                              const sheetCards = await GSheets.readCards(settings.scriptUrl);
-                              const sheetDays = await GSheets.readMeta(settings.scriptUrl);
-                              setCards(sheetCards);
-                              setPracticeDays(sheetDays);
-                              await window.storage.set("vocab-cards", JSON.stringify(sheetCards)).catch(() => {});
-                              await window.storage.set("vocab-practice-days", JSON.stringify(sheetDays)).catch(() => {});
+                              const remoteCards = await GSheets.readCards(settings.scriptUrl);
+                              const remoteMeta = await GSheets.readMeta(settings.scriptUrl);
+                              const { cards: merged, deleted: mergedDel } = mergeCards(
+                                cards, remoteCards, deletedCards, remoteMeta.deletedCards || {}
+                              );
+                              const mergedDays = mergePracticeDays(practiceDays, remoteMeta.practiceDays || {});
+                              setCards(merged);
+                              setPracticeDays(mergedDays);
+                              setDeletedCards(mergedDel);
+                              await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
+                              await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
+                              await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
                               setSyncStatus("synced");
                               setLastSynced(new Date().toLocaleTimeString());
                             } catch(e) { setSyncStatus("error"); setSyncError(e.message); }
