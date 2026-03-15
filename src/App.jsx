@@ -1992,6 +1992,7 @@ export default function VocabApp() {
   const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
   const [showAddInline, setShowAddInline] = useState(false);
   const [showImportInline, setShowImportInline] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState("asc");
   const [activityRange, setActivityRange] = useState("month");
@@ -2184,7 +2185,6 @@ export default function VocabApp() {
     { id: "chat", label: t.chat, badge: null },
     { id: "words", label: t.words, badge: cards.length || null },
     { id: "heatmap", label: t.progress },
-    { id: "settings", label: t.settings },
   ];
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
   return (
@@ -2204,8 +2204,9 @@ export default function VocabApp() {
           <h1 style={{ fontFamily: font.display, fontSize: 28, fontWeight: 700, color: T.text, margin: 0, letterSpacing: -0.5, textTransform: "capitalize" }}>
             vocabulário
           </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
-            onClick={() => settings.scriptUrl ? manualSync() : setView("settings")}
+            onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
             disabled={syncStatus === "syncing"}
             title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
             style={{
@@ -2243,6 +2244,23 @@ export default function VocabApp() {
               {syncStatus === "syncing" ? t.sheetsSyncing : syncStatus === "synced" ? (lastSynced || t.sheetsSynced) : syncStatus === "error" ? t.sheetsError : "sync"}
             </span>
           </button>
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 34, height: 34, borderRadius: 20,
+              background: T.accentSoft,
+              border: `1px solid ${T.border}`,
+              cursor: "pointer", transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+          </div>
         </div>
         <div className="nav-scroll" style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.border}`, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           {navItems.map((item) => (
@@ -2325,7 +2343,7 @@ export default function VocabApp() {
             dueCards={dueCards}
             settings={settings}
             onReviewCard={reviewCard}
-            onGoToSettings={() => setView("settings")}
+            onGoToSettings={() => setShowSettingsModal(true)}
           />
         )}
         {view === "words" && (
@@ -2680,12 +2698,9 @@ export default function VocabApp() {
             })()}
           </>
         )}
-        {view === "settings" && (
+        <Modal open={showSettingsModal} onClose={() => setShowSettingsModal(false)} title={t.settingsTitle}>
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 18 : 28, boxShadow: T.shadow }}>
-              <div style={{ fontFamily: font.display, fontSize: 20, fontWeight: 700, color: T.text, marginBottom: 28, textTransform: "capitalize" }}>
-                {t.settingsTitle}
-              </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
                 <div>
                   <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
@@ -3051,7 +3066,7 @@ export default function VocabApp() {
               </div>
             </div>
           </div>
-        )}
+        </Modal>
       </div>
     </div>
   );
