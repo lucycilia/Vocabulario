@@ -3529,7 +3529,7 @@ export default function VocabApp() {
                       <span style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", fontFamily: font.body, fontSize: 13, padding: "8px 32px 8px 14px" }} ref={(el) => {
                         if (el && el.parentElement) {
                           const sel = el.parentElement.querySelector("select");
-                          if (sel) sel.style.width = el.offsetWidth + "px";
+                          if (sel) sel.style.width = (el.offsetWidth + 8) + "px";
                         }
                       }}>
                         {activityRange === "week" ? t.thisWeek : activityRange === "month" ? t.thisMonth : t.thisYear}
