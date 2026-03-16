@@ -1610,7 +1610,7 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
           <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, wordBreak: "break-word" }}>{card.word}</span>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            {!isNew && (() => {
+            {(() => {
               const stage = getStage(card);
               const sc = stageColors[stage];
               const isDark = T.bg === "#111614";
@@ -1710,9 +1710,7 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
       <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, padding: "6px 0", wordBreak: "break-word" }}>{card.word}</span>
       <EditableCell html={toEnHtml()} onCommit={commitEn} style={cellStyle} />
       <EditableCell html={toPtHtml()} onCommit={commitPt} style={cellStyle} />
-      {isNew ? (
-        <div />
-      ) : (() => {
+      {(() => {
         const stage = getStage(card);
         const sc = stageColors[stage];
         const isDark = T.bg === "#111614";
