@@ -1232,11 +1232,12 @@ function PhraseDisplay({ phrase, keywordStart, keywordEnd, size = "normal" }) {
   const keyword = phrase.slice(keywordStart, keywordEnd);
   const after = phrase.slice(keywordEnd);
   const fs = size === "large" ? 20 : size === "practice" ? 24 : 14;
+  const textColor = size === "practice" ? T.text : T.textSecondary;
   return (
     <span style={{ fontSize: fs, lineHeight: 1.7, fontFamily: font.body, fontWeight: 400 }}>
-      <span style={{ color: T.textSecondary }}>{before}</span>
+      <span style={{ color: textColor }}>{before}</span>
       <span style={{ color: T.keyword, fontWeight: 700, background: T.keywordBg, padding: "2px 4px", borderRadius: 4 }}>{keyword}</span>
-      <span style={{ color: T.textSecondary }}>{after}</span>
+      <span style={{ color: textColor }}>{after}</span>
     </span>
   );
 }
