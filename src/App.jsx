@@ -3183,6 +3183,16 @@ export default function VocabApp() {
                   </div>
                 </div>
                 <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} totalDue={dueCards.length} studyDirection={studyDirection} />
+                {(dueReview > 0 || dueNew > 0) && (
+                  <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
+                    <span style={{
+                      fontFamily: font.mono, fontSize: 11, fontWeight: 600,
+                      color: T.textTertiary, letterSpacing: 0.5,
+                    }}>
+                      {dueReview > 0 ? `D${dueReview}` : ""}{dueReview > 0 && dueNew > 0 ? " | " : ""}{dueNew > 0 ? `N${dueNew}` : ""}
+                    </span>
+                  </div>
+                )}
               </>
             )}
           </>
@@ -4043,7 +4053,7 @@ export default function VocabApp() {
           zIndex: 1000,
         }}>
           {[
-            { id: "practice", label: t.practice, badge: practiceBadgeMobile, icon: (active) => (
+            { id: "practice", label: t.practice, badge: null, icon: (active) => (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12H17V17C17 19.7614 14.7614 22 12 22H10C7.23858 22 5 19.7614 5 17V12Z"/><path d="M17 13H19C20.1046 13 21 13.8954 21 15V15C21 16.1046 20.1046 17 19 17H17"/><path d="M9 9C9 9 8 8.5 8 7C8 5.5 9 5 9 5"/><path d="M12 3C12 3 13 3.5 13 5C13 6.5 12 7 12 7"/>
               </svg>
