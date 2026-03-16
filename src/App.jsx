@@ -4038,7 +4038,7 @@ export default function VocabApp() {
           backdropFilter: "blur(24px) saturate(1.8)",
           WebkitBackdropFilter: "blur(24px) saturate(1.8)",
           display: "flex", justifyContent: "space-around", alignItems: "center",
-          padding: "8px 4px",
+          padding: "4px 4px",
           zIndex: 1000,
         }}>
           {[
