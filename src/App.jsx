@@ -4077,13 +4077,13 @@ export default function VocabApp() {
                 }}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  {tab.icon(active)}
+                  <span style={{ flexShrink: 0, display: "flex" }}>{tab.icon(active)}</span>
                   {tab.badge && (
                     <span style={{
                       background: T.text, color: T.bg,
-                      fontFamily: font.mono, fontSize: 11, fontWeight: 700,
-                      padding: "3px 8px", borderRadius: 9999, whiteSpace: "nowrap",
-                      lineHeight: 1,
+                      fontFamily: font.mono, fontSize: 10, fontWeight: 700,
+                      padding: "2px 6px", borderRadius: 9999, whiteSpace: "nowrap",
+                      lineHeight: 1, marginTop: 2,
                     }}>
                       {tab.badge}
                     </span>
