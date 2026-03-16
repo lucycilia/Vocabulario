@@ -3255,7 +3255,7 @@ export default function VocabApp() {
                                       {total}
                                     </tspan>
                                     <tspan x={viewBox.cx} y={viewBox.cy + 14} style={{ fontSize: 8, fill: T.textTertiary, fontFamily: font.mono, textTransform: "uppercase", letterSpacing: "1.5px" }}>
-                                      {t.totalWords}
+                                      {t.wordsPlural}
                                     </tspan>
                                   </text>
                                 );
