@@ -2893,8 +2893,11 @@ export default function VocabApp() {
       </div>
     );
   }
+  const dueReview = dueCards.filter(c => c.reps > 0).length;
+  const dueNew = dueCards.filter(c => c.reps === 0).length;
+  const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
   const navItems = [
-    { id: "practice", label: t.practice, badge: dueCards.length || null },
+    { id: "practice", label: t.practice, badge: practiceBadge },
     { id: "chat", label: t.chat, badge: null },
     { id: "words", label: t.words, badge: cards.length || null },
     { id: "heatmap", label: t.progress },
