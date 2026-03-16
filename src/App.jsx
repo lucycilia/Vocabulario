@@ -226,9 +226,12 @@ const parseImportText = (text) => {
   const results = [];
   const errors = [];
   let startIdx = 0;
-  if (lines.length > 0) {
+  if (lines.length > 1) {
     const first = lines[0].toLowerCase().trim();
-    if (first.includes("português") || first.includes("portuguese") || first.includes("english") || first.includes("phrase") || first.includes("word") || first.includes("front") || first.includes("back")) {
+    const headerWords = ["português", "portuguese", "english", "phrase", "word", "front", "back", "palavra", "tradução", "translation"];
+    const cells = first.split(/[,;\t|↔<>]|==|>>/).map(s => s.trim()).filter(Boolean);
+    const isHeader = cells.length >= 2 && cells.every(c => c.split(/\s+/).length <= 3) && cells.some(c => headerWords.includes(c));
+    if (isHeader) {
       startIdx = 1;
     }
   }
