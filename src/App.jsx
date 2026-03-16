@@ -3072,7 +3072,7 @@ export default function VocabApp() {
           </button>
           </div>
         </div>
-        <div className="nav-scroll" style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.border}`, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div className="nav-scroll" style={{ display: mobile ? "none" : "flex", gap: 0, borderBottom: `1px solid ${T.border}`, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -3114,7 +3114,7 @@ export default function VocabApp() {
           ))}
         </div>
       </div>
-      <div style={{ padding: mobile ? "20px 16px 60px" : "32px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 100px" : "32px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
         {view === "practice" && (
           <>
             {dueCards.length === 0 ? (
@@ -4026,6 +4026,73 @@ export default function VocabApp() {
           </div>
         </Modal>
       </div>
+      {mobile && (
+        <div style={{
+          position: "fixed", bottom: 12, left: 12, right: 12,
+          background: T.bgCard, borderRadius: 24,
+          border: `1px solid ${T.border}`,
+          boxShadow: T.shadowLg,
+          display: "flex", justifyContent: "space-around", alignItems: "center",
+          padding: "8px 4px",
+          zIndex: 1000,
+        }}>
+          {[
+            { id: "practice", label: t.practice, badge: practiceBadge, icon: (active) => (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+            )},
+            { id: "chat", label: t.chat, badge: null, icon: (active) => (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+              </svg>
+            )},
+            { id: "words", label: t.words, badge: null, icon: (active) => (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            )},
+            { id: "heatmap", label: t.progress, badge: null, icon: (active) => (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+              </svg>
+            )},
+          ].map((tab) => {
+            const active = view === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setView(tab.id)}
+                style={{
+                  flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                  background: active ? T.accentSoft : "none", border: "none",
+                  borderRadius: 16, padding: "6px 4px",
+                  cursor: "pointer", position: "relative",
+                }}
+              >
+                {tab.icon(active)}
+                <span style={{
+                  fontFamily: font.body, fontSize: 9, fontWeight: active ? 700 : 500,
+                  color: active ? T.text : T.textTertiary,
+                  textTransform: "capitalize", letterSpacing: 0.2,
+                }}>
+                  {tab.label}
+                </span>
+                {tab.badge && (
+                  <span style={{
+                    position: "absolute", top: 1, right: "50%", transform: "translateX(14px)",
+                    background: T.accent, color: T.bg,
+                    fontFamily: font.mono, fontSize: 7, fontWeight: 600,
+                    padding: "1px 4px", borderRadius: 6, whiteSpace: "nowrap",
+                  }}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
