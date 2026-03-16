@@ -919,6 +919,8 @@ const i18n = {
     daysInARow: "dias seguidos",
     less: "menos",
     more: "mais",
+    review1: "revisão",
+    reviewN: "revisões",
     totalWords: "total de palavras",
     totalReviews: "revisões totais",
     avgPerDay: "média por dia",
@@ -1046,6 +1048,8 @@ const i18n = {
     daysInARow: "days in a row",
     less: "less",
     more: "more",
+    review1: "review",
+    reviewN: "reviews",
     totalWords: "total words",
     totalReviews: "total reviews",
     avgPerDay: "average per day",
@@ -1098,6 +1102,8 @@ const i18n = {
 let t = i18n["pt-BR"];
 // ─── Heatmap Component ───
 function CalendarHeatmap({ practiceDays, year, onYearChange }) {
+  const [tooltip, setTooltip] = useState(null);
+  const gridRef = useRef(null);
   const days = getDaysInYear(year);
   const maxCount = Math.max(1, ...Object.values(practiceDays).filter(Boolean));
   const weeks = [];
@@ -1191,28 +1197,67 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
           </span>
         ))}
       </div>
-      <div style={{
+      <div ref={gridRef} style={{
         display: "grid",
         gridTemplateColumns: `repeat(${totalWeeks}, 1fr)`,
         gap: gap,
         width: "100%",
+        position: "relative",
       }}>
         {weeks.map((week, wi) => (
           <div key={wi} style={{ display: "flex", flexDirection: "column", gap: gap }}>
             {week.map((day, di) => (
               <div
                 key={di}
-                title={day ? `${day}: ${practiceDays[day] || 0} reviews` : ""}
                 style={{
                   width: "100%",
                   paddingBottom: "100%",
                   borderRadius: 2,
                   background: getColor(day),
+                  cursor: day && (practiceDays[day] || 0) > 0 ? "pointer" : "default",
                 }}
+                onMouseEnter={(e) => {
+                  if (!day) return;
+                  const count = practiceDays[day] || 0;
+                  if (count === 0) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const gridRect = gridRef.current.getBoundingClientRect();
+                  setTooltip({
+                    day,
+                    count,
+                    x: rect.left - gridRect.left + rect.width / 2,
+                    y: rect.top - gridRect.top,
+                  });
+                }}
+                onMouseLeave={() => setTooltip(null)}
               />
             ))}
           </div>
         ))}
+        {tooltip && (
+          <div style={{
+            position: "absolute",
+            left: tooltip.x,
+            top: tooltip.y - 6,
+            transform: "translate(-50%, -100%)",
+            background: T.bgCard,
+            color: T.text,
+            border: `1px solid ${T.borderStrong}`,
+            borderRadius: 8,
+            padding: "5px 10px",
+            fontFamily: font.mono,
+            fontSize: 11,
+            fontWeight: 500,
+            whiteSpace: "nowrap",
+            boxShadow: T.shadowLg,
+            pointerEvents: "none",
+            zIndex: 10,
+          }}>
+            <span style={{ fontWeight: 700 }}>{tooltip.count}</span>
+            <span style={{ color: T.textTertiary }}> {tooltip.count === 1 ? t.review1 : t.reviewN} </span>
+            <span style={{ color: T.textTertiary }}>&middot; {tooltip.day}</span>
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 10 }}>
         <span style={{ fontFamily: font.mono, fontSize: 9, color: T.textTertiary, marginRight: 2 }}>{t.less}</span>
