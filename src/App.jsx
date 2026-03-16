@@ -454,6 +454,8 @@ const i18n = {
     sheetsSynced: "Sincronizado ✓",
     sheetsError: "Erro de sincronização",
     sheetsLastSync: "Última sincronização",
+    enToPt: "EN → PT",
+    ptToEn: "PT → EN",
   },
   en: {
     practice: "practice",
@@ -577,6 +579,8 @@ const i18n = {
     sheetsSynced: "Synced ✓",
     sheetsError: "Sync error",
     sheetsLastSync: "Last synced",
+    enToPt: "EN → PT",
+    ptToEn: "PT → EN",
   },
 };
 let t = i18n["pt-BR"];
@@ -850,7 +854,7 @@ function AddCardForm({ onAdd, onCancel }) {
   );
 }
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, totalDue }) {
+function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -893,11 +897,36 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
         {!flipped ? (
           <>
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
-              {t.english}
+              {studyDirection === "en-pt" ? t.english : t.portuguese}
             </div>
-            <div style={{ fontFamily: font.display, fontSize: mobile ? 26 : 34, fontWeight: 400, color: T.text, lineHeight: 1.2 }}>
-              {card.translation}
-            </div>
+            {studyDirection === "en-pt" ? (
+              <div style={{ fontFamily: font.display, fontSize: mobile ? 26 : 34, fontWeight: 400, color: T.text, lineHeight: 1.2 }}>
+                {card.translation}
+              </div>
+            ) : (
+              <>
+                <div style={{ fontFamily: font.display, fontSize: mobile ? 28 : 24, fontWeight: 400, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
+                  {card.word}
+                </div>
+                {card.phrase && (
+                  <div style={{ marginTop: 16, maxWidth: mobile ? "100%" : 380 }}>
+                    <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="normal" />
+                  </div>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); speakPT(card.phrase || card.word); }}
+                  style={{
+                    marginTop: 24, background: T.accentSoft, border: `1px solid ${T.border}`,
+                    borderRadius: 24, padding: "9px 22px", color: T.textSecondary,
+                    fontFamily: font.body, fontSize: 13, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
+                  }}
+                >
+                  <SpeakerIcon size={16} color={T.textSecondary} />
+                  {t.listenPronunciation}
+                </button>
+              </>
+            )}
             <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 32, letterSpacing: 0.5 }}>
               {t.tapToReveal}
             </div>
@@ -905,37 +934,36 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
         ) : (
           <>
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.keyword, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
-              {t.portuguese}
+              {studyDirection === "en-pt" ? t.portuguese : t.english}
             </div>
-            <div style={{ fontFamily: font.display, fontSize: mobile ? 28 : 24, fontWeight: 400, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
-              {card.word}
-            </div>
-            {card.phrase && (
-              <div style={{ marginTop: 16, maxWidth: mobile ? "100%" : 380 }}>
-                <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="normal" />
+            {studyDirection === "en-pt" ? (
+              <>
+                <div style={{ fontFamily: font.display, fontSize: mobile ? 28 : 24, fontWeight: 400, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
+                  {card.word}
+                </div>
+                {card.phrase && (
+                  <div style={{ marginTop: 16, maxWidth: mobile ? "100%" : 380 }}>
+                    <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="normal" />
+                  </div>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); speakPT(card.phrase || card.word); }}
+                  style={{
+                    marginTop: 24, background: T.accentSoft, border: `1px solid ${T.border}`,
+                    borderRadius: 24, padding: "9px 22px", color: T.textSecondary,
+                    fontFamily: font.body, fontSize: 13, cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
+                  }}
+                >
+                  <SpeakerIcon size={16} color={T.textSecondary} />
+                  {t.listenPronunciation}
+                </button>
+              </>
+            ) : (
+              <div style={{ fontFamily: font.display, fontSize: mobile ? 26 : 34, fontWeight: 400, color: T.text, lineHeight: 1.2 }}>
+                {card.translation}
               </div>
             )}
-            <button
-              onClick={(e) => { e.stopPropagation(); speakPT(card.phrase || card.word); }}
-              style={{
-                marginTop: 24,
-                background: T.accentSoft,
-                border: `1px solid ${T.border}`,
-                borderRadius: 24,
-                padding: "9px 22px",
-                color: T.textSecondary,
-                fontFamily: font.body,
-                fontSize: 13,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                transition: "all 0.15s",
-              }}
-            >
-              <SpeakerIcon size={16} color={T.textSecondary} />
-              {t.listenPronunciation}
-            </button>
           </>
         )}
       </div>
@@ -2069,6 +2097,7 @@ export default function VocabApp() {
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState("asc");
   const [activityRange, setActivityRange] = useState("month");
+  const [studyDirection, setStudyDirection] = useState("en-pt");
   const [settings, setSettings] = useState({
     theme: "light",
     dailyGoal: 20,
@@ -2464,7 +2493,36 @@ export default function VocabApp() {
               </div>
             ) : (
               <>
-                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} totalDue={dueCards.length} />
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                  <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 20, padding: 3 }}>
+                    {[
+                      { id: "en-pt", label: t.enToPt },
+                      { id: "pt-en", label: t.ptToEn },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        onClick={() => setStudyDirection(opt.id)}
+                        style={{
+                          padding: "6px 16px",
+                          background: studyDirection === opt.id ? T.bgCard : "transparent",
+                          border: "none",
+                          borderRadius: 17,
+                          fontFamily: font.mono,
+                          fontSize: 12,
+                          fontWeight: studyDirection === opt.id ? 600 : 400,
+                          color: studyDirection === opt.id ? T.text : T.textTertiary,
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                          boxShadow: studyDirection === opt.id ? T.shadow : "none",
+                          letterSpacing: 0.5,
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} totalDue={dueCards.length} studyDirection={studyDirection} />
               </>
             )}
           </>
