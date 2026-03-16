@@ -794,7 +794,8 @@ const themes = {
     shadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)",
     shadowLg: "0 4px 20px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)",
     radius: 16,
-    radiusSm: 10,
+    radiusSm: 9999,
+    radiusPill: 9999,
     heatEmpty: "#E8E8E8",
     heat1: "#CCCCCC",
     heat2: "#8FB59A",
@@ -824,7 +825,8 @@ const themes = {
     shadow: "0 1px 4px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2)",
     shadowLg: "0 4px 24px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.3)",
     radius: 16,
-    radiusSm: 10,
+    radiusSm: 9999,
+    radiusPill: 9999,
     heatEmpty: "rgba(255,255,255,0.06)",
     heat1: "#1A3A2A",
     heat2: "#2D6A4F",
@@ -1163,7 +1165,7 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={() => onYearChange(year - 1)} style={{
             background: T.bgInput, border: `1px solid ${T.borderStrong}`, color: T.text,
-            borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
+            borderRadius: 9999, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
             fontSize: 14, fontWeight: 500, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
             transition: "background 0.15s",
           }}
@@ -1175,7 +1177,7 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
           <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 600, color: T.text, minWidth: 48, textAlign: "center" }}>{year}</span>
           <button onClick={() => onYearChange(year + 1)} style={{
             background: T.bgInput, border: `1px solid ${T.borderStrong}`, color: T.text,
-            borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
+            borderRadius: 9999, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
             fontSize: 14, fontWeight: 500, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
             transition: "background 0.15s",
           }}
@@ -1864,7 +1866,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
     </div>
   );
 });
-const iconBtnStyle = { background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.5, transition: "opacity 0.15s" };
+const iconBtnStyle = { background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 9999, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.5, transition: "opacity 0.15s" };
 // ─── Full Page Modal ───
 function Modal({ open, onClose, title, children }) {
   const mobile = useIsMobile();
@@ -1879,7 +1881,7 @@ function Modal({ open, onClose, title, children }) {
         onClick={onClose}
         style={{
           position: "fixed", top: mobile ? 12 : 20, right: mobile ? 12 : 20, zIndex: 110,
-          width: 44, height: 44, borderRadius: 22,
+          width: 44, height: 44, borderRadius: 9999,
           background: T.bgCard,
           border: `1px solid ${T.border}`,
           boxShadow: T.shadowLg,
@@ -2992,8 +2994,8 @@ export default function VocabApp() {
   const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
-    { id: "chat", label: t.chat, badge: null },
     { id: "words", label: t.words, badge: cards.length || null },
+    { id: "chat", label: t.chat, badge: null },
     { id: "heatmap", label: t.progress },
   ];
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
@@ -3021,7 +3023,7 @@ export default function VocabApp() {
             title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
             style={{
               display: "flex", alignItems: "center", gap: 7,
-              padding: "6px 12px", borderRadius: 20,
+              padding: "6px 12px", borderRadius: 9999,
               background: syncStatus === "synced" ? T.keywordBg : syncStatus === "error" ? T.dangerBg : T.accentSoft,
               border: `1px solid ${syncStatus === "synced" ? "rgba(45,106,79,0.2)" : syncStatus === "error" ? "rgba(196,72,62,0.2)" : T.border}`,
               cursor: syncStatus === "syncing" ? "default" : "pointer",
@@ -3058,7 +3060,7 @@ export default function VocabApp() {
             onClick={() => setShowSettingsModal(true)}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: 34, height: 34, borderRadius: 20,
+              width: 34, height: 34, borderRadius: 9999,
               background: T.accentSoft,
               border: `1px solid ${T.border}`,
               cursor: "pointer", transition: "all 0.2s",
@@ -3105,7 +3107,7 @@ export default function VocabApp() {
                   background: view === item.id ? T.accent : T.accentSoft,
                   color: view === item.id ? T.bg : T.textTertiary,
                   fontFamily: font.mono, fontSize: 10, fontWeight: 500,
-                  padding: "2px 7px", borderRadius: 10,
+                  padding: "2px 7px", borderRadius: 9999,
                 }}>
                   {item.badge}
                 </span>
@@ -3149,7 +3151,7 @@ export default function VocabApp() {
             ) : (
               <>
                 <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-                  <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 20, padding: 3 }}>
+                  <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
                     {[
                       { id: "en-pt", label: t.enToPt },
                       { id: "pt-en", label: t.ptToEn },
@@ -3161,7 +3163,7 @@ export default function VocabApp() {
                           padding: "6px 16px",
                           background: studyDirection === opt.id ? T.bgCard : "transparent",
                           border: "none",
-                          borderRadius: 17,
+                          borderRadius: 9999,
                           fontFamily: font.mono,
                           fontSize: 12,
                           fontWeight: studyDirection === opt.id ? 600 : 400,
@@ -4029,9 +4031,12 @@ export default function VocabApp() {
       {mobile && (
         <div style={{
           position: "fixed", bottom: 12, left: 12, right: 12,
-          background: T.bgCard, borderRadius: 24,
-          border: `1px solid ${T.border}`,
-          boxShadow: T.shadowLg,
+          background: settings.theme === "dark" ? "rgba(30,30,30,0.65)" : "rgba(255,255,255,0.55)",
+          borderRadius: 9999,
+          border: `1px solid ${settings.theme === "dark" ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.6)"}`,
+          boxShadow: `0 8px 32px rgba(0,0,0,${settings.theme === "dark" ? "0.4" : "0.12"}), inset 0 1px 0 ${settings.theme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.7)"}`,
+          backdropFilter: "blur(24px) saturate(1.8)",
+          WebkitBackdropFilter: "blur(24px) saturate(1.8)",
           display: "flex", justifyContent: "space-around", alignItems: "center",
           padding: "8px 4px",
           zIndex: 1000,
@@ -4039,22 +4044,22 @@ export default function VocabApp() {
           {[
             { id: "practice", label: t.practice, badge: practiceBadge, icon: (active) => (
               <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>
-              </svg>
-            )},
-            { id: "chat", label: t.chat, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                <path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
               </svg>
             )},
             { id: "words", label: t.words, badge: null, icon: (active) => (
               <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+              </svg>
+            )},
+            { id: "chat", label: t.chat, badge: null, icon: (active) => (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
             )},
             { id: "heatmap", label: t.progress, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
               </svg>
             )},
           ].map((tab) => {
@@ -4065,8 +4070,8 @@ export default function VocabApp() {
                 onClick={() => setView(tab.id)}
                 style={{
                   flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-                  background: active ? T.accentSoft : "none", border: "none",
-                  borderRadius: 16, padding: "6px 4px",
+                  background: active ? (settings.theme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)") : "none", border: "none",
+                  borderRadius: 9999, padding: "6px 4px",
                   cursor: "pointer", position: "relative",
                 }}
               >
@@ -4083,7 +4088,7 @@ export default function VocabApp() {
                     position: "absolute", top: 1, right: "50%", transform: "translateX(14px)",
                     background: T.accent, color: T.bg,
                     fontFamily: font.mono, fontSize: 7, fontWeight: 600,
-                    padding: "1px 4px", borderRadius: 6, whiteSpace: "nowrap",
+                    padding: "1px 4px", borderRadius: 9999, whiteSpace: "nowrap",
                   }}>
                     {tab.badge}
                   </span>
