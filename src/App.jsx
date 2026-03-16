@@ -1277,7 +1277,7 @@ function Modal({ open, onClose, title, children }) {
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       </button>
-      <div style={{ padding: mobile ? "20px 16px 60px" : "36px 32px 60px", maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 60px" : "36px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
         {title && (
           <div style={{ fontFamily: font.display, fontSize: mobile ? 20 : 24, fontWeight: 700, color: T.text, marginBottom: mobile ? 20 : 28, textTransform: "capitalize" }}>
             {title}
@@ -2306,7 +2306,7 @@ export default function VocabApp() {
         .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-      <div style={{ padding: mobile ? "20px 16px 0" : "36px 32px 0", maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 0" : "36px 32px 0", maxWidth: 1100, margin: "0 auto" }}>
         <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h1 style={{ fontFamily: font.display, fontSize: 28, fontWeight: 700, color: T.text, margin: 0, letterSpacing: -0.5, textTransform: "capitalize" }}>
             vocabulário
@@ -2409,7 +2409,7 @@ export default function VocabApp() {
           ))}
         </div>
       </div>
-      <div style={{ padding: mobile ? "20px 16px 60px" : "32px 32px 60px", maxWidth: 760, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 60px" : "32px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
         {view === "practice" && (
           <>
             {dueCards.length === 0 ? (
