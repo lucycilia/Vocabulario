@@ -967,7 +967,7 @@ const i18n = {
     enToPt: "EN → PT",
     ptToEn: "PT → EN",
     searchPlaceholder: "buscar palavras ou frases...",
-    groupByStage: "agrupar por estágio",
+    groupByStage: "agrupar",
   },
   en: {
     practice: "practice",
@@ -1096,7 +1096,7 @@ const i18n = {
     enToPt: "EN → PT",
     ptToEn: "PT → EN",
     searchPlaceholder: "search words or phrases...",
-    groupByStage: "group by stage",
+    groupByStage: "group",
   },
 };
 let t = i18n["pt-BR"];
