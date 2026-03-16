@@ -933,6 +933,12 @@ const i18n = {
     stageMature: "Maduro",
     stageMastered: "Dominado",
     stageBreakdown: "Progresso por estágio",
+    recallRate: "Taxa de retenção",
+    recallStrong: "Forte",
+    recallGood: "Bom",
+    recallFading: "Apagando",
+    recallAtRisk: "Em risco",
+    recallLabel: "retenção",
     studyActivity: "Atividade de estudo",
     studyActivityDesc: "Palavras revisadas por dia",
     wordsReviewed: "Palavras revisadas",
@@ -1062,6 +1068,12 @@ const i18n = {
     stageMature: "Mature",
     stageMastered: "Mastered",
     stageBreakdown: "Progress by stage",
+    recallRate: "Recall rate",
+    recallStrong: "Strong",
+    recallGood: "Good",
+    recallFading: "Fading",
+    recallAtRisk: "At risk",
+    recallLabel: "recall",
     studyActivity: "Study activity",
     studyActivityDesc: "Words reviewed per day",
     wordsReviewed: "Words reviewed",
@@ -3407,8 +3419,32 @@ export default function VocabApp() {
                   fill: isDark ? stageColors[s].darkText : stageColors[s].text,
                   stage: s,
                 }));
+              const reviewedCards = cards.filter(c => c.reps > 0);
+              const nowDate = new Date();
+              const recallBands = [
+                { key: "strong", label: t.recallStrong, color: T.success, count: 0 },
+                { key: "good", label: t.recallGood, color: T.accent, count: 0 },
+                { key: "fading", label: t.recallFading, color: T.warning, count: 0 },
+                { key: "atRisk", label: t.recallAtRisk, color: T.danger, count: 0 },
+              ];
+              reviewedCards.forEach(c => {
+                const elapsed = c.lastReview ? Math.max(0, (nowDate - new Date(c.lastReview + "T12:00:00")) / 86400000) : 0;
+                const r = FSRS.retrievability(elapsed, c.stability);
+                if (r >= 0.9) recallBands[0].count++;
+                else if (r >= 0.7) recallBands[1].count++;
+                else if (r >= 0.5) recallBands[2].count++;
+                else recallBands[3].count++;
+              });
+              const avgRecall = reviewedCards.length > 0
+                ? Math.round(reviewedCards.reduce((sum, c) => {
+                    const elapsed = c.lastReview ? Math.max(0, (nowDate - new Date(c.lastReview + "T12:00:00")) / 86400000) : 0;
+                    return sum + FSRS.retrievability(elapsed, c.stability);
+                  }, 0) / reviewedCards.length * 100)
+                : 0;
+              const recallChartData = recallBands.filter(b => b.count > 0).map(b => ({ name: b.label, value: b.count, fill: b.color }));
               return (
-                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 16 : 28, boxShadow: T.shadow, marginBottom: 14 }}>
+                <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 16 : 28, boxShadow: T.shadow }}>
                   <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
                     {t.stageBreakdown}
                   </div>
@@ -3493,6 +3529,97 @@ export default function VocabApp() {
                       })}
                     </div>
                   </div>
+                </div>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 16 : 28, boxShadow: T.shadow }}>
+                  <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
+                    {t.recallRate}
+                  </div>
+                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 24 }}>
+                    {reviewedCards.length} {reviewedCards.length === 1 ? t.word : t.wordsPlural}
+                  </div>
+                  {reviewedCards.length > 0 ? (
+                    <div style={{ display: "flex", flexDirection: mobile ? "column" : "row", alignItems: "center", justifyContent: "center", gap: mobile ? 24 : 80 }}>
+                      <div style={{ flexShrink: 0 }}>
+                        <PieChart width={mobile ? 160 : 190} height={mobile ? 160 : 190}>
+                          <Pie
+                            data={recallChartData}
+                            cx={mobile ? 80 : 95}
+                            cy={mobile ? 80 : 95}
+                            innerRadius={mobile ? 50 : 62}
+                            outerRadius={mobile ? 74 : 88}
+                            paddingAngle={1}
+                            dataKey="value"
+                            nameKey="name"
+                            strokeWidth={0}
+                          >
+                            {recallChartData.map((entry, index) => (
+                              <Cell key={`recall-${index}`} fill={entry.fill} />
+                            ))}
+                            <Label
+                              content={({ viewBox }) => {
+                                if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                                  return (
+                                    <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
+                                      <tspan x={viewBox.cx} y={viewBox.cy - 5} style={{ fontSize: 24, fontWeight: 700, fill: T.text, fontFamily: font.display }}>
+                                        {avgRecall}%
+                                      </tspan>
+                                      <tspan x={viewBox.cx} y={viewBox.cy + 14} style={{ fontSize: 8, fill: T.textTertiary, fontFamily: font.mono, textTransform: "uppercase", letterSpacing: "1.5px" }}>
+                                        {t.recallLabel}
+                                      </tspan>
+                                    </text>
+                                  );
+                                }
+                              }}
+                            />
+                          </Pie>
+                          <RechartsTooltip
+                            content={({ active, payload }) => {
+                              if (active && payload && payload.length) {
+                                const d = payload[0];
+                                const pct = Math.round((d.value / reviewedCards.length) * 100);
+                                return (
+                                  <div style={{
+                                    background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 8,
+                                    padding: "8px 12px", boxShadow: T.shadowLg,
+                                  }}>
+                                    <div style={{ fontFamily: font.body, fontSize: 13, fontWeight: 500, color: T.text }}>{d.name}</div>
+                                    <div style={{ fontFamily: font.mono, fontSize: 12, color: T.textTertiary, marginTop: 2 }}>
+                                      {d.value} ({pct}%)
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                        </PieChart>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {recallBands.map((band) => {
+                          const pct = reviewedCards.length > 0 ? Math.round((band.count / reviewedCards.length) * 100) : 0;
+                          return (
+                            <div key={band.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: 2, background: band.color, flexShrink: 0 }} />
+                              <span style={{ fontFamily: font.body, fontSize: 13, fontWeight: 500, color: T.text, minWidth: 80 }}>
+                                {band.label}
+                              </span>
+                              <span style={{ fontFamily: font.mono, fontSize: 12, color: T.textTertiary, minWidth: 24, textAlign: "right" }}>
+                                {band.count}
+                              </span>
+                              <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary, minWidth: 32, textAlign: "right" }}>
+                                {pct}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: "center", padding: "40px 20px", color: T.textTertiary, fontFamily: font.body, fontSize: 13 }}>
+                      {t.addWordsToStart}
+                    </div>
+                  )}
+                </div>
                 </div>
               );
             })()}
