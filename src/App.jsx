@@ -963,6 +963,7 @@ const i18n = {
     enToPt: "EN → PT",
     ptToEn: "PT → EN",
     searchPlaceholder: "buscar palavras ou frases...",
+    groupByStage: "agrupar por estágio",
   },
   en: {
     practice: "practice",
@@ -1089,6 +1090,7 @@ const i18n = {
     enToPt: "EN → PT",
     ptToEn: "PT → EN",
     searchPlaceholder: "search words or phrases...",
+    groupByStage: "group by stage",
   },
 };
 let t = i18n["pt-BR"];
@@ -2614,6 +2616,13 @@ export default function VocabApp() {
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState("asc");
   const [searchQuery, setSearchQuery] = useState("");
+  const [groupByStage, setGroupByStage] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  const toggleGroup = (stage) => setCollapsedGroups(prev => {
+    const next = new Set(prev);
+    next.has(stage) ? next.delete(stage) : next.add(stage);
+    return next;
+  });
   const [activityRange, setActivityRange] = useState("month");
   const [studyDirection, setStudyDirection] = useState("en-pt");
   const [settings, setSettings] = useState({
@@ -3116,6 +3125,24 @@ export default function VocabApp() {
                 />
               </div>
               <button
+                onClick={() => { setGroupByStage(prev => !prev); setCollapsedGroups(new Set()); }}
+                style={{
+                  padding: "9px 14px",
+                  background: groupByStage ? T.accent : "transparent",
+                  border: `1px solid ${groupByStage ? T.accent : T.border}`,
+                  borderRadius: T.radiusSm,
+                  color: groupByStage ? T.bg : T.textSecondary,
+                  fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
+                  display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+                  transition: "all 0.15s",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+                {t.groupByStage}
+              </button>
+              <button
                 onClick={() => setShowImportInline(true)}
                 style={{
                   padding: "9px 18px", background: T.accent,
@@ -3178,7 +3205,50 @@ export default function VocabApp() {
                     </span>
                   ))}
                 </div>
-                {filteredCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} />)}
+                {groupByStage ? (
+                  ["new", "learning", "young", "mature", "mastered"].map(stage => {
+                    const stageCards = filteredCards.filter(c => getStage(c) === stage);
+                    if (stageCards.length === 0) return null;
+                    const sc = stageColors[stage];
+                    const isDark = T.bg === "#111614";
+                    const isCollapsed = collapsedGroups.has(stage);
+                    return (
+                      <div key={stage}>
+                        <div
+                          onClick={() => toggleGroup(stage)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            padding: "10px 20px",
+                            background: sc.bg,
+                            borderBottom: `1px solid ${T.border}`,
+                            cursor: "pointer", userSelect: "none",
+                            position: "sticky", top: 0, zIndex: 2,
+                          }}
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isDark ? sc.darkText : sc.text} strokeWidth="2.5" strokeLinecap="round"
+                            style={{ transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+                          >
+                            <polyline points="6 9 12 15 18 9"/>
+                          </svg>
+                          <span style={{
+                            fontFamily: font.mono, fontSize: 11, padding: "3px 10px", borderRadius: 20, letterSpacing: 0.5,
+                            background: sc.bg, color: isDark ? sc.darkText : sc.text, fontWeight: 600,
+                          }}>
+                            {stageLabel(stage)}
+                          </span>
+                          <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
+                            {stageCards.length}
+                          </span>
+                        </div>
+                        {!isCollapsed && stageCards.map(card => (
+                          <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} />
+                        ))}
+                      </div>
+                    );
+                  })
+                ) : (
+                  filteredCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} />)
+                )}
               </div>
             )}
           </>
