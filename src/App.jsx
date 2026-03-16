@@ -1610,7 +1610,7 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
           <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, wordBreak: "break-word" }}>{card.word}</span>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            {(() => {
+            {!isNew && (() => {
               const stage = getStage(card);
               const sc = stageColors[stage];
               const isDark = T.bg === "#111614";
@@ -1678,15 +1678,17 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
             <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="small" />
           </div>
         )}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-          <span style={{
-            fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
-            background: isNew ? T.accentSoft : isOverdue ? T.dangerBg : T.accentSoft,
-            color: isNew ? T.textTertiary : isOverdue ? T.danger : T.textTertiary,
-          }}>
-            {dueLabel}
-          </span>
-        </div>
+        {!isNew && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+            <span style={{
+              fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
+              background: isOverdue ? T.dangerBg : T.accentSoft,
+              color: isOverdue ? T.danger : T.textTertiary,
+            }}>
+              {dueLabel}
+            </span>
+          </div>
+        )}
       </div>
     );
   }
@@ -1708,7 +1710,9 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
       <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, padding: "6px 0", wordBreak: "break-word" }}>{card.word}</span>
       <EditableCell html={toEnHtml()} onCommit={commitEn} style={cellStyle} />
       <EditableCell html={toPtHtml()} onCommit={commitPt} style={cellStyle} />
-      {(() => {
+      {isNew ? (
+        <div />
+      ) : (() => {
         const stage = getStage(card);
         const sc = stageColors[stage];
         const isDark = T.bg === "#111614";
@@ -1723,15 +1727,19 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
           </div>
         );
       })()}
-      <div style={{ display: "flex", justifyContent: "flex-start", paddingTop: 4 }}>
-        <span style={{
-          fontFamily: font.mono, fontSize: 10, padding: "4px 10px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
-          background: isNew ? T.accentSoft : isOverdue ? T.dangerBg : T.accentSoft,
-          color: isNew ? T.textTertiary : isOverdue ? T.danger : T.textTertiary,
-        }}>
-          {dueLabel}
-        </span>
-      </div>
+      {isNew ? (
+        <div />
+      ) : (
+        <div style={{ display: "flex", justifyContent: "flex-start", paddingTop: 4 }}>
+          <span style={{
+            fontFamily: font.mono, fontSize: 10, padding: "4px 10px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
+            background: isOverdue ? T.dangerBg : T.accentSoft,
+            color: isOverdue ? T.danger : T.textTertiary,
+          }}>
+            {dueLabel}
+          </span>
+        </div>
+      )}
       <div style={{ position: "relative", paddingTop: 4 }}>
         <button
           onClick={() => setMenuOpen(!menuOpen)}
