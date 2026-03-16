@@ -772,16 +772,16 @@ const MONTH_LABELS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "s
 // ─── Design Tokens (theme-aware) ───
 const themes = {
   light: {
-    bg: "#FAF8F5",
+    bg: "#F5F5F5",
     bgCard: "#FFFFFF",
-    bgCardHover: "#F7F5F2",
-    bgInput: "#F5F3F0",
-    border: "rgba(0,0,0,0.06)",
-    borderStrong: "rgba(0,0,0,0.10)",
+    bgCardHover: "#EFEFEF",
+    bgInput: "#EFEFEF",
+    border: "rgba(0,0,0,0.08)",
+    borderStrong: "rgba(0,0,0,0.14)",
     text: "#1A1A1A",
-    textSecondary: "#57534E",
-    textTertiary: "#8C877F",
-    textPlaceholder: "#C4BDB6",
+    textSecondary: "#555555",
+    textTertiary: "#888888",
+    textPlaceholder: "#BBBBBB",
     accent: "#1A1A1A",
     accentSoft: "rgba(26,26,26,0.06)",
     keyword: "#2D6A4F",
@@ -795,24 +795,24 @@ const themes = {
     shadowLg: "0 4px 20px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)",
     radius: 16,
     radiusSm: 10,
-    heatEmpty: "#EDEAE6",
-    heat1: "#D5CEBC",
+    heatEmpty: "#E8E8E8",
+    heat1: "#CCCCCC",
     heat2: "#8FB59A",
     heat3: "#5A9E6F",
     heat4: "#2D6A4F",
   },
   dark: {
-    bg: "#111614",
-    bgCard: "#1B1F1D",
-    bgCardHover: "#242926",
-    bgInput: "#252A27",
-    border: "rgba(255,255,255,0.09)",
-    borderStrong: "rgba(255,255,255,0.18)",
-    text: "#EDEDEB",
-    textSecondary: "#C4BFB8",
-    textTertiary: "#908B85",
-    textPlaceholder: "#5C5753",
-    accent: "#EDEDEB",
+    bg: "#0E0E0E",
+    bgCard: "#1A1A1A",
+    bgCardHover: "#232323",
+    bgInput: "#232323",
+    border: "rgba(255,255,255,0.10)",
+    borderStrong: "rgba(255,255,255,0.20)",
+    text: "#F0F0F0",
+    textSecondary: "#B0B0B0",
+    textTertiary: "#808080",
+    textPlaceholder: "#505050",
+    accent: "#F0F0F0",
     accentSoft: "rgba(255,255,255,0.08)",
     keyword: "#6FCF97",
     keywordBg: "rgba(111,207,151,0.12)",
@@ -821,8 +821,8 @@ const themes = {
     dangerBg: "rgba(242,139,130,0.1)",
     warning: "#F5C563",
     warningBg: "rgba(245,197,99,0.1)",
-    shadow: "0 1px 4px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.2)",
-    shadowLg: "0 4px 24px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.25)",
+    shadow: "0 1px 4px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2)",
+    shadowLg: "0 4px 24px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.3)",
     radius: 16,
     radiusSm: 10,
     heatEmpty: "rgba(255,255,255,0.06)",
@@ -1637,7 +1637,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
             {(() => {
               const stage = getStage(card);
               const sc = stageColors[stage];
-              const isDark = T.bg === "#111614";
+              const isDark = T.bg === "#0E0E0E";
               return (
                 <span style={{
                   fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
@@ -1739,7 +1739,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
       {(() => {
         const stage = getStage(card);
         const sc = stageColors[stage];
-        const isDark = T.bg === "#111614";
+        const isDark = T.bg === "#0E0E0E";
         return (
           <div style={{ display: "flex", justifyContent: "flex-start", paddingTop: 4 }}>
             <span style={{
@@ -3266,7 +3266,7 @@ export default function VocabApp() {
                     const stageCards = filteredCards.filter(c => getStage(c) === stage);
                     if (stageCards.length === 0) return null;
                     const sc = stageColors[stage];
-                    const isDark = T.bg === "#111614";
+                    const isDark = T.bg === "#0E0E0E";
                     const isCollapsed = collapsedGroups.has(stage);
                     return (
                       <div key={stage}>
@@ -3340,7 +3340,7 @@ export default function VocabApp() {
             </div>
             {cards.length > 0 && (() => {
               const stages = ["new", "learning", "young", "mature", "mastered"];
-              const isDark = T.bg === "#111614";
+              const isDark = T.bg === "#0E0E0E";
               const counts = {};
               stages.forEach((s) => { counts[s] = 0; });
               cards.forEach((c) => { counts[getStage(c)]++; });
@@ -3443,7 +3443,7 @@ export default function VocabApp() {
               );
             })()}
             {(() => {
-              const isDark = T.bg === "#111614";
+              const isDark = T.bg === "#0E0E0E";
               const accentColor = isDark ? "#6FCF97" : "#2D6A4F";
               const now = new Date();
               let daysBack = 30;
