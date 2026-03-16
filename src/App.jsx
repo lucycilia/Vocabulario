@@ -3723,7 +3723,7 @@ export default function VocabApp() {
                   </div>
                   <div style={{ display: "flex", gap: 10 }}>
                     {[
-                      { id: "pt-BR", label: "Português (Brasil)", icon: "🇧🇷" },
+                      { id: "pt-BR", label: "Português", icon: "🇧🇷" },
                       { id: "en", label: "English", icon: "🇬🇧" },
                     ].map((opt) => (
                       <button
