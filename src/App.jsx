@@ -1160,7 +1160,10 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
             borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
             fontSize: 14, fontWeight: 500, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
             transition: "background 0.15s",
-          }}>
+          }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = T.bgCardHover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = T.bgInput; }}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 600, color: T.text, minWidth: 48, textAlign: "center" }}>{year}</span>
@@ -1169,7 +1172,10 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
             borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
             fontSize: 14, fontWeight: 500, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
             transition: "background 0.15s",
-          }}>
+          }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = T.bgCardHover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = T.bgInput; }}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
@@ -1339,7 +1345,10 @@ function AddCardForm({ onAdd, onCancel }) {
       </div>
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         {onCancel && (
-          <button onClick={onCancel} style={{ padding: "11px 22px", background: "none", border: `1px solid ${T.border}`, borderRadius: T.radiusSm, color: T.textSecondary, fontFamily: font.body, fontSize: 14, cursor: "pointer" }}>
+          <button onClick={onCancel} style={{ padding: "11px 22px", background: "none", border: `1px solid ${T.border}`, borderRadius: T.radiusSm, color: T.textSecondary, fontFamily: font.body, fontSize: 14, cursor: "pointer", transition: "all 0.15s" }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.color = T.text; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.textSecondary; }}
+          >
             cancelar
           </button>
         )}
@@ -1359,6 +1368,8 @@ function AddCardForm({ onAdd, onCancel }) {
             transition: "all 0.2s",
             letterSpacing: 0.3,
           }}
+          onMouseEnter={(e) => { if (canSubmit) e.currentTarget.style.opacity = "0.85"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
         >
           adicionar
         </button>
@@ -1406,6 +1417,8 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
           boxShadow: T.shadowLg,
           transition: "all 0.3s",
         }}
+        onMouseEnter={(e) => { if (!flipped) e.currentTarget.style.borderColor = T.borderStrong; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
       >
         {!flipped ? (
           <>
@@ -1435,6 +1448,8 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
                     fontFamily: font.body, fontSize: 13, cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
                   }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.accentSoft; }}
                 >
                   <SpeakerIcon size={16} color={T.textSecondary} />
                   {t.listenPronunciation}
@@ -1469,6 +1484,8 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
                     fontFamily: font.body, fontSize: 13, cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
                   }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.accentSoft; }}
                 >
                   <SpeakerIcon size={16} color={T.textSecondary} />
                   {t.listenPronunciation}
@@ -2081,6 +2098,8 @@ function ImportPanel({ onImport, existingCount }) {
                 color: T.textSecondary, fontFamily: font.body, fontSize: 13, cursor: "pointer",
                 display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "none"; }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
@@ -2135,8 +2154,10 @@ function ImportPanel({ onImport, existingCount }) {
                 color: selected.size > 0 ? T.bg : T.textPlaceholder,
                 fontFamily: font.body, fontSize: 13, fontWeight: 600,
                 cursor: selected.size > 0 ? "pointer" : "default",
-                letterSpacing: 0.3,
+                letterSpacing: 0.3, transition: "all 0.15s",
               }}
+              onMouseEnter={(e) => { if (selected.size > 0) e.currentTarget.style.opacity = "0.85"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
             >
               {t.add} {selected.size} {selected.size === 1 ? t.word : t.wordsPlural}
             </button>
@@ -2145,6 +2166,8 @@ function ImportPanel({ onImport, existingCount }) {
             <div
               onClick={allSelected ? deselectAll : selectAll}
               style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              onMouseEnter={(e) => { const c = e.currentTarget.firstChild; if (c) c.style.borderColor = T.borderStrong; }}
+              onMouseLeave={(e) => { const c = e.currentTarget.firstChild; if (c) c.style.borderColor = allSelected || someSelected ? T.success : T.borderStrong; }}
             >
               <div style={{
                 width: 18, height: 18, borderRadius: 4,
@@ -2191,6 +2214,8 @@ function ImportPanel({ onImport, existingCount }) {
                   opacity: isSelected ? 1 : 0.4,
                   background: isSelected ? "transparent" : T.bgCardHover,
                 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = T.bgCardHover; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = isSelected ? "transparent" : T.bgCardHover; }}
               >
                 <div
                   onClick={() => toggleItem(i)}
@@ -2390,7 +2415,9 @@ Start the conversation naturally in Portuguese, using one or two of the due word
             setStarted(true);
             await sendToAPI([], true);
           }}
-          style={{ padding: "13px 36px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3 }}
+          style={{ padding: "13px 36px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3, transition: "all 0.15s" }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
         >
           {t.chatStart}
         </button>
@@ -2506,6 +2533,8 @@ Start the conversation naturally in Portuguese, using one or two of the due word
             letterSpacing: 0.3,
             flexShrink: 0,
           }}
+          onMouseEnter={(e) => { if (!loading && input.trim()) e.currentTarget.style.opacity = "0.85"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
         >
           {t.chatSend}
         </button>
@@ -3024,6 +3053,8 @@ export default function VocabApp() {
                 whiteSpace: "nowrap",
                 flexShrink: 0,
               }}
+              onMouseEnter={(e) => { if (view !== item.id) e.currentTarget.style.color = T.textSecondary; }}
+              onMouseLeave={(e) => { if (view !== item.id) e.currentTarget.style.color = T.textTertiary; }}
             >
               {item.label}
               {item.badge && (
@@ -3063,8 +3094,11 @@ export default function VocabApp() {
                 {cards.length === 0 && (
                   <button onClick={() => { setView("words"); setShowImportInline(true); }} style={{
                     padding: "13px 32px", background: T.accent, border: "none", borderRadius: T.radiusSm,
-                    color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3,
-                  }}>
+                    color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3, transition: "all 0.15s",
+                  }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+                  >
                     adicionar primeira palavra
                   </button>
                 )}
@@ -3094,6 +3128,8 @@ export default function VocabApp() {
                           boxShadow: studyDirection === opt.id ? T.shadow : "none",
                           letterSpacing: 0.5,
                         }}
+                        onMouseEnter={(e) => { if (studyDirection !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
+                        onMouseLeave={(e) => { if (studyDirection !== opt.id) e.currentTarget.style.background = "transparent"; }}
                       >
                         {opt.label}
                       </button>
@@ -3149,6 +3185,8 @@ export default function VocabApp() {
                   display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
                   transition: "all 0.15s",
                 }}
+                onMouseEnter={(e) => { if (!groupByStage) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.accentSoft; } }}
+                onMouseLeave={(e) => { if (!groupByStage) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
@@ -3164,7 +3202,10 @@ export default function VocabApp() {
                   color: T.bg,
                   fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
                   display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+                  transition: "all 0.15s",
                 }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
@@ -3205,6 +3246,8 @@ export default function VocabApp() {
                         display: "flex", alignItems: "center", gap: 4,
                         transition: "color 0.15s",
                       }}
+                      onMouseEnter={(e) => { if (col.key) e.currentTarget.style.color = T.text; }}
+                      onMouseLeave={(e) => { if (col.key) e.currentTarget.style.color = sortKey === col.key ? T.text : T.textTertiary; }}
                     >
                       {col.label}
                       {col.key && sortKey === col.key && (
@@ -3236,7 +3279,10 @@ export default function VocabApp() {
                             borderBottom: `1px solid ${T.border}`,
                             cursor: "pointer", userSelect: "none",
                             position: "sticky", top: 0, zIndex: 2,
+                            transition: "filter 0.15s",
                           }}
+                          onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(0.97)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isDark ? sc.darkText : sc.text} strokeWidth="2.5" strokeLinecap="round"
                             style={{ transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
@@ -3549,6 +3595,8 @@ export default function VocabApp() {
                           fontFamily: font.body, fontSize: 13, fontWeight: 500,
                           cursor: "pointer", transition: "all 0.15s",
                         }}
+                        onMouseEnter={(e) => { if (settings.dailyGoal !== n) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                        onMouseLeave={(e) => { if (settings.dailyGoal !== n) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
                       >
                         {n}
                       </button>
@@ -3579,6 +3627,8 @@ export default function VocabApp() {
                           display: "flex", alignItems: "center", gap: 10,
                           transition: "all 0.15s",
                         }}
+                        onMouseEnter={(e) => { if (settings.theme !== opt.id) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                        onMouseLeave={(e) => { if (settings.theme !== opt.id) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
                       >
                         {opt.icon === "sun" ? (
                           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -3621,6 +3671,8 @@ export default function VocabApp() {
                           display: "flex", alignItems: "center", gap: 10,
                           transition: "all 0.15s",
                         }}
+                        onMouseEnter={(e) => { if (settings.lang !== opt.id) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                        onMouseLeave={(e) => { if (settings.lang !== opt.id) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
                       >
                         <span style={{ fontSize: 20 }}>{opt.icon}</span>
                         <span style={{ fontFamily: font.body, fontSize: 14, fontWeight: settings.lang === opt.id ? 600 : 400, color: T.text }}>
@@ -3653,6 +3705,8 @@ export default function VocabApp() {
                           borderRadius: T.radiusSm, cursor: "pointer", textAlign: "left",
                           transition: "all 0.15s",
                         }}
+                        onMouseEnter={(e) => { if (settings.cardOrder !== opt.id) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                        onMouseLeave={(e) => { if (settings.cardOrder !== opt.id) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
                       >
                         <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: settings.cardOrder === opt.id ? 600 : 400, color: T.text }}>
                           {opt.label}
@@ -3707,6 +3761,8 @@ export default function VocabApp() {
                       display: "flex", alignItems: "center", gap: 8,
                       transition: "all 0.15s",
                     }}
+                    onMouseEnter={(e) => { if (cards.length > 0) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                    onMouseLeave={(e) => { if (cards.length > 0) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -3809,6 +3865,8 @@ export default function VocabApp() {
                           cursor: scriptUrlInput.trim() ? "pointer" : "default",
                           transition: "all 0.2s", letterSpacing: 0.3,
                         }}
+                        onMouseEnter={(e) => { if (scriptUrlInput.trim() && !sheetsSaved) e.currentTarget.style.opacity = "0.85"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
                       >
                         {sheetsSaved ? t.sheetsSynced : t.sheetsSave}
                       </button>
@@ -3901,6 +3959,8 @@ export default function VocabApp() {
                             whiteSpace: "nowrap",
                             flexShrink: 0,
                           }}
+                          onMouseEnter={(e) => { if (apiKeyInput.trim() && !keySaved) e.currentTarget.style.opacity = "0.85"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
                         >
                           {keySaved ? t.apiKeySaved : t.add}
                         </button>
