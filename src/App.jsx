@@ -1202,7 +1202,6 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
         gridTemplateColumns: `repeat(${totalWeeks}, 1fr)`,
         gap: gap,
         width: "100%",
-        position: "relative",
       }}>
         {weeks.map((week, wi) => (
           <div key={wi} style={{ display: "flex", flexDirection: "column", gap: gap }}>
@@ -1221,12 +1220,11 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
                   const count = practiceDays[day] || 0;
                   if (count === 0) return;
                   const rect = e.currentTarget.getBoundingClientRect();
-                  const gridRect = gridRef.current.getBoundingClientRect();
                   setTooltip({
                     day,
                     count,
-                    x: rect.left - gridRect.left + rect.width / 2,
-                    y: rect.top - gridRect.top,
+                    x: rect.left + rect.width / 2,
+                    y: rect.top,
                   });
                 }}
                 onMouseLeave={() => setTooltip(null)}
@@ -1234,31 +1232,31 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
             ))}
           </div>
         ))}
-        {tooltip && (
-          <div style={{
-            position: "absolute",
-            left: tooltip.x,
-            top: tooltip.y - 6,
-            transform: "translate(-50%, -100%)",
-            background: T.bgCard,
-            color: T.text,
-            border: `1px solid ${T.borderStrong}`,
-            borderRadius: 8,
-            padding: "5px 10px",
-            fontFamily: font.mono,
-            fontSize: 11,
-            fontWeight: 500,
-            whiteSpace: "nowrap",
-            boxShadow: T.shadowLg,
-            pointerEvents: "none",
-            zIndex: 10,
-          }}>
-            <span style={{ fontWeight: 700 }}>{tooltip.count}</span>
-            <span style={{ color: T.textTertiary }}> {tooltip.count === 1 ? t.review1 : t.reviewN} </span>
-            <span style={{ color: T.textTertiary }}>&middot; {tooltip.day}</span>
-          </div>
-        )}
       </div>
+      {tooltip && (
+        <div style={{
+          position: "fixed",
+          left: tooltip.x,
+          top: tooltip.y - 6,
+          transform: "translate(-50%, -100%)",
+          background: T.bgCard,
+          color: T.text,
+          border: `1px solid ${T.borderStrong}`,
+          borderRadius: 8,
+          padding: "5px 10px",
+          fontFamily: font.mono,
+          fontSize: 11,
+          fontWeight: 500,
+          whiteSpace: "nowrap",
+          boxShadow: T.shadowLg,
+          pointerEvents: "none",
+          zIndex: 9999,
+        }}>
+          <span style={{ fontWeight: 700 }}>{tooltip.count}</span>
+          <span style={{ color: T.textTertiary }}> {tooltip.count === 1 ? t.review1 : t.reviewN} </span>
+          <span style={{ color: T.textTertiary }}>&middot; {tooltip.day}</span>
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 10 }}>
         <span style={{ fontFamily: font.mono, fontSize: 9, color: T.textTertiary, marginRight: 2 }}>{t.less}</span>
         {[T.heatEmpty, T.heat1, T.heat2, T.heat3, T.heat4].map((c, i) => (
