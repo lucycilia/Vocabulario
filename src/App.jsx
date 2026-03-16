@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { PieChart, Pie, Label, Tooltip as RechartsTooltip, Cell, AreaChart, Area, XAxis, CartesianGrid, ResponsiveContainer } from "recharts";
+import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense } from "react";
+const RechartsModule = lazy(() =>
+  import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
+);
 // ─── Mobile Detection ───
 const useIsMobile = (breakpoint = 600) => {
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.innerWidth < breakpoint);
@@ -1515,7 +1517,7 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
   );
 }
 // ─── Word Row ───
-function WordRow({ card, onDelete, onSpeak, onUpdate }) {
+const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
   const mobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const isOverdue = card.dueDate <= today();
@@ -1608,6 +1610,8 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
           padding: "12px 16px",
           borderBottom: `1px solid ${T.border}`,
           position: "relative",
+          contentVisibility: "auto",
+          containIntrinsicSize: "auto 80px",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
@@ -1705,6 +1709,8 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
         padding: "10px 20px",
         borderBottom: `1px solid ${T.border}`,
         transition: "background 0.12s",
+        contentVisibility: "auto",
+        containIntrinsicSize: "auto 48px",
         position: "relative",
       }}
       onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
@@ -1797,7 +1803,7 @@ function WordRow({ card, onDelete, onSpeak, onUpdate }) {
       </div>
     </div>
   );
-}
+});
 const iconBtnStyle = { background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.5, transition: "opacity 0.15s" };
 // ─── Full Page Modal ───
 function Modal({ open, onClose, title, children }) {
@@ -2728,23 +2734,27 @@ export default function VocabApp() {
           await window.storage.set("vocab-practice-days", JSON.stringify(localDays)).catch(() => {});
         }
       } catch {}
+      // Show local data immediately
+      setCards(localCards);
+      setPracticeDays(localDays);
+      setDeletedCards(localDeleted);
+      setLoaded(true);
+
+      // Background sync with Google Sheets
       const sUrl = savedSettings?.scriptUrl || "";
       if (sUrl) {
         setSyncStatus("syncing");
         try {
           const remoteCards = await GSheets.readCards(sUrl);
           const remoteMeta = await GSheets.readMeta(sUrl);
-          // Merge local + remote
           const { cards: merged, deleted: mergedDel } = mergeCards(
             localCards, remoteCards, localDeleted, remoteMeta.deletedCards || {}
           );
           let mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
-          // Apply RemNote migration to merged result if first time
           let finalCards = merged;
           if (didRemnoteMigration) {
             const migResult = applyRemnoteDueDates(merged);
             finalCards = migResult.cards;
-            // Merge practice days from migration into merged days
             for (const [day, count] of Object.entries(migResult.practiceDayCounts)) {
               mergedDays[day] = Math.max(mergedDays[day] || 0, count);
             }
@@ -2752,7 +2762,6 @@ export default function VocabApp() {
           setCards(finalCards);
           setPracticeDays(mergedDays);
           setDeletedCards(mergedDel);
-          // Write merged result back to both
           await window.storage.set("vocab-cards", JSON.stringify(finalCards)).catch(() => {});
           await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
           await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
@@ -2763,17 +2772,8 @@ export default function VocabApp() {
         } catch (e) {
           setSyncStatus("error");
           setSyncError(e.message);
-          // Fallback to local data
-          setCards(localCards);
-          setPracticeDays(localDays);
-          setDeletedCards(localDeleted);
         }
-      } else {
-        setCards(localCards);
-        setPracticeDays(localDays);
-        setDeletedCards(localDeleted);
       }
-      setLoaded(true);
     };
     load();
     if ("speechSynthesis" in window) { window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices(); }
@@ -2845,15 +2845,25 @@ export default function VocabApp() {
   }, []);
   const addCard = (card) => { const nc = [...cards, card]; setCards(nc); save(nc, practiceDays); setShowAddInline(false); };
   const addCards = (newCards) => { const nc = [...cards, ...newCards]; setCards(nc); save(nc, practiceDays); };
-  const deleteCard = (id) => {
-    const nc = cards.filter((c) => c.id !== id);
-    const nd = { ...deletedCards, [id]: Date.now() };
-    setCards(nc);
-    setDeletedCards(nd);
-    window.storage.set("vocab-deleted", JSON.stringify(nd)).catch(() => {});
-    save(nc, practiceDays);
-  };
-  const updateCard = (id, updated) => { const nc = cards.map((c) => c.id === id ? { ...c, ...updated, modifiedAt: Date.now() } : c); setCards(nc); save(nc, practiceDays); };
+  const deleteCard = useCallback((id) => {
+    setCards(prev => {
+      const nc = prev.filter((c) => c.id !== id);
+      setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
+      return nc;
+    });
+    setDeletedCards(prev => {
+      const nd = { ...prev, [id]: Date.now() };
+      window.storage.set("vocab-deleted", JSON.stringify(nd)).catch(() => {});
+      return nd;
+    });
+  }, [save]);
+  const updateCard = useCallback((id, updated) => {
+    setCards(prev => {
+      const nc = prev.map((c) => c.id === id ? { ...c, ...updated, modifiedAt: Date.now() } : c);
+      setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
+      return nc;
+    });
+  }, [save]);
   const reviewCard = (id, quality) => {
     const nc = cards.map((c) => c.id === id ? FSRS.review(c, quality) : c);
     const nd = { ...practiceDays }; const t = today(); nd[t] = (nd[t] || 0) + 1;
@@ -2861,7 +2871,7 @@ export default function VocabApp() {
   };
   const [skippedIds, setSkippedIds] = useState(new Set());
   const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };
-  const dueCards = (() => {
+  const dueCards = useMemo(() => {
     let due = cards.filter((c) => c.dueDate <= today() && !skippedIds.has(c.id));
     if (settings.cardOrder === "random") {
       const seed = today().replace(/-/g, "") | 0;
@@ -2875,26 +2885,29 @@ export default function VocabApp() {
       return shuffled;
     }
     return due.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  })();
-  const stageOrder = { new: 0, learning: 1, young: 2, mature: 3, mastered: 4 };
-  const sortedCards = [...cards].sort((a, b) => {
-    let va, vb;
-    if (sortKey === "word") { va = (a.word || "").toLowerCase(); vb = (b.word || "").toLowerCase(); }
-    else if (sortKey === "translation") { va = (a.translation || "").toLowerCase(); vb = (b.translation || "").toLowerCase(); }
-    else if (sortKey === "phrase") { va = (a.phrase || "").toLowerCase(); vb = (b.phrase || "").toLowerCase(); }
-    else if (sortKey === "stage") { va = stageOrder[getStage(a)]; vb = stageOrder[getStage(b)]; }
-    else if (sortKey === "dueDate") { va = a.dueDate || ""; vb = b.dueDate || ""; }
-    else { va = ""; vb = ""; }
-    if (va < vb) return sortDir === "asc" ? -1 : 1;
-    if (va > vb) return sortDir === "asc" ? 1 : -1;
-    return 0;
-  });
-  const filteredCards = searchQuery.trim()
-    ? sortedCards.filter((c) => {
-        const q = searchQuery.toLowerCase();
-        return (c.word || "").toLowerCase().includes(q) || (c.translation || "").toLowerCase().includes(q) || (c.phrase || "").toLowerCase().includes(q);
-      })
-    : sortedCards;
+  }, [cards, skippedIds, settings.cardOrder]);
+  const sortedCards = useMemo(() => {
+    const so = { new: 0, learning: 1, young: 2, mature: 3, mastered: 4 };
+    return [...cards].sort((a, b) => {
+      let va, vb;
+      if (sortKey === "word") { va = (a.word || "").toLowerCase(); vb = (b.word || "").toLowerCase(); }
+      else if (sortKey === "translation") { va = (a.translation || "").toLowerCase(); vb = (b.translation || "").toLowerCase(); }
+      else if (sortKey === "phrase") { va = (a.phrase || "").toLowerCase(); vb = (b.phrase || "").toLowerCase(); }
+      else if (sortKey === "stage") { va = so[getStage(a)]; vb = so[getStage(b)]; }
+      else if (sortKey === "dueDate") { va = a.dueDate || ""; vb = b.dueDate || ""; }
+      else { va = ""; vb = ""; }
+      if (va < vb) return sortDir === "asc" ? -1 : 1;
+      if (va > vb) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }, [cards, sortKey, sortDir]);
+  const filteredCards = useMemo(() => {
+    if (!searchQuery.trim()) return sortedCards;
+    const q = searchQuery.toLowerCase();
+    return sortedCards.filter((c) =>
+      (c.word || "").toLowerCase().includes(q) || (c.translation || "").toLowerCase().includes(q) || (c.phrase || "").toLowerCase().includes(q)
+    );
+  }, [sortedCards, searchQuery]);
   if (!loaded) {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -2902,8 +2915,8 @@ export default function VocabApp() {
       </div>
     );
   }
-  const dueReview = dueCards.filter(c => c.reps > 0).length;
-  const dueNew = dueCards.filter(c => c.reps === 0).length;
+  const dueReview = useMemo(() => dueCards.filter(c => c.reps > 0).length, [dueCards]);
+  const dueNew = useMemo(() => dueCards.filter(c => c.reps === 0).length, [dueCards]);
   const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
@@ -3254,6 +3267,9 @@ export default function VocabApp() {
           </>
         )}
         {view === "heatmap" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: T.textTertiary }}>...</div>}>
+          <RechartsModule>
+          {({ PieChart, Pie, Label, Tooltip: RechartsTooltip, Cell, AreaChart, Area, XAxis, CartesianGrid, ResponsiveContainer }) => (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
               {[
@@ -3504,6 +3520,9 @@ export default function VocabApp() {
               );
             })()}
           </>
+          )}
+          </RechartsModule>
+          </Suspense>
         )}
         <Modal open={showSettingsModal} onClose={() => setShowSettingsModal(false)} title={t.settingsTitle}>
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
