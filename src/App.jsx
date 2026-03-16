@@ -3208,7 +3208,7 @@ export default function VocabApp() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t.searchPlaceholder || "buscar..."}
+                  placeholder=""
                   style={{
                     width: "100%", boxSizing: "border-box",
                     padding: "9px 12px 9px 36px",
