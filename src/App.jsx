@@ -473,6 +473,8 @@ const applyRemnoteDueDates = (cards) => {
     const key = entry.text.toLowerCase().trim();
     lookup.set(key, { dueDate: entry.dueDate, reps: entry.reps });
   }
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
   let updated = 0;
   const result = cards.map(card => {
     // Try matching against word, translation, and phrase
@@ -482,12 +484,28 @@ const applyRemnoteDueDates = (cards) => {
       const match = lookup.get(key);
       if (match) {
         updated++;
-        return { ...card, dueDate: match.dueDate, reps: match.reps, modifiedAt: Date.now() };
+        // Estimate stability from interval (in FSRS, stability ≈ interval)
+        const dueMs = new Date(match.dueDate + "T12:00:00") - now;
+        const intervalDays = Math.max(1, Math.round(dueMs / 86400000));
+        // In FSRS: interval = (s / F) * (R^(1/C) - 1), which simplifies to s ≈ interval
+        const stability = Math.max(1, intervalDays);
+        // Estimate difficulty: cards with more reps and longer intervals are easier
+        // Use moderate difficulty (5 = middle), adjusted slightly by reps
+        const difficulty = Math.min(10, Math.max(1, 7 - match.reps * 0.3));
+        return {
+          ...card,
+          dueDate: match.dueDate,
+          reps: match.reps,
+          stability,
+          difficulty,
+          lastReview: todayStr,
+          modifiedAt: Date.now(),
+        };
       }
     }
     return card;
   });
-  if (updated > 0) console.log(`[RemNote migration] Updated ${updated} cards with due dates`);
+  if (updated > 0) console.log(`[RemNote migration] Updated ${updated} cards with due dates and FSRS state`);
   return result;
 };
 // ─── Date Helpers ───
@@ -2441,11 +2459,11 @@ export default function VocabApp() {
       // One-time RemNote due date migration
       let didRemnoteMigration = false;
       try {
-        const migFlag = await window.storage.get("vocab-remnote-migrated");
+        const migFlag = await window.storage.get("vocab-remnote-migrated-v2");
         if (!migFlag) {
           localCards = applyRemnoteDueDates(localCards);
           didRemnoteMigration = true;
-          await window.storage.set("vocab-remnote-migrated", "1").catch(() => {});
+          await window.storage.set("vocab-remnote-migrated-v2", "1").catch(() => {});
           await window.storage.set("vocab-cards", JSON.stringify(localCards)).catch(() => {});
         }
       } catch {}
