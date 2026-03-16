@@ -3360,11 +3360,20 @@ export default function VocabApp() {
           <RechartsModule>
           {({ PieChart, Pie, Label, Tooltip: RechartsTooltip, Cell, AreaChart, Area, XAxis, CartesianGrid, ResponsiveContainer }) => (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
               {[
                 { label: t.daysStudied, value: (() => {
                   const yr = new Date().getFullYear();
                   return Object.keys(practiceDays).filter((d) => d.startsWith(String(yr)) && practiceDays[d] > 0).length;
+                })() },
+                { label: t.dayStreak, value: (() => {
+                  let streak = 0;
+                  let d = new Date();
+                  while (true) {
+                    const ds = d.toISOString().split("T")[0];
+                    if (practiceDays[ds] && practiceDays[ds] > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
+                  }
+                  return streak;
                 })() },
                 { label: t.avgPerDay, value: (() => {
                   const ad = Object.values(practiceDays).filter((v) => v > 0).length;
