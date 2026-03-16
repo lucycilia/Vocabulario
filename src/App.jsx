@@ -234,7 +234,7 @@ const parseImportText = (text) => {
   }
   for (let i = startIdx; i < lines.length; i++) {
     const parsed = parseImportLine(lines[i]);
-    if (parsed) results.push(parsed);
+    if (parsed) results.push({ ...parsed, _srcLine: lines[i].trim() });
     else if (lines[i].trim()) errors.push({ line: i + 1, text: lines[i].trim() });
   }
   return { results, errors };
@@ -1343,14 +1343,34 @@ function ImportPanel({ onImport, existingCount }) {
   const [importedCount, setImportedCount] = useState(0);
   const [fileLoaded, setFileLoaded] = useState(false);
   const fileRef = useRef(null);
+  const resultsRef = useRef(results);
+  resultsRef.current = results;
   const handleTextChange = (val) => {
     setText(val);
     setImportedCount(0);
     if (val.trim()) {
       const parsed = parseImportText(val);
-      setResults(parsed.results);
       setErrors(parsed.errors);
-      setSelected(new Set(parsed.results.map((_, i) => i)));
+      setResults((prev) => {
+        return parsed.results.map((newR, i) => {
+          if (i < prev.length && prev[i]._srcLine === newR._srcLine) {
+            return prev[i];
+          }
+          return newR;
+        });
+      });
+      setSelected((prevSel) => {
+        const prev = resultsRef.current;
+        const next = new Set();
+        parsed.results.forEach((newR, i) => {
+          if (i < prev.length && prev[i]._srcLine === newR._srcLine) {
+            if (prevSel.has(i)) next.add(i);
+          } else {
+            next.add(i);
+          }
+        });
+        return next;
+      });
     } else {
       setResults([]);
       setErrors([]);
