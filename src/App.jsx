@@ -1156,11 +1156,6 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
           <span style={{ fontFamily: font.display, fontSize: 15, fontWeight: 700, color: T.text }}>
             {t.daysPracticed}
           </span>
-          {currentStreak > 0 && (
-            <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
-              {currentStreak} {t.daysInARow}
-            </span>
-          )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={() => onYearChange(year - 1)} style={{
