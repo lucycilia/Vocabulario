@@ -3219,7 +3219,8 @@ export default function VocabApp() {
               <button
                 onClick={() => { setGroupByStage(prev => !prev); setCollapsedGroups(new Set()); }}
                 style={{
-                  padding: "9px 14px",
+                  padding: mobile ? "0 14px" : "9px 14px",
+                  height: mobile ? 36 : undefined,
                   marginLeft: mobile ? 0 : "auto",
                   background: groupByStage ? T.accent : "transparent",
                   border: `1px solid ${groupByStage ? T.accent : T.border}`,
