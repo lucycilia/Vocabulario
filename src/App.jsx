@@ -3016,7 +3016,7 @@ export default function VocabApp() {
             title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
             style={{
               display: "flex", alignItems: "center", gap: 7,
-              padding: "6px 12px", borderRadius: 9999,
+              padding: "0 12px", height: 34, borderRadius: 9999,
               background: syncStatus === "synced" ? T.keywordBg : syncStatus === "error" ? T.dangerBg : T.accentSoft,
               border: `1px solid ${syncStatus === "synced" ? "rgba(45,106,79,0.2)" : syncStatus === "error" ? "rgba(196,72,62,0.2)" : T.border}`,
               cursor: syncStatus === "syncing" ? "default" : "pointer",
