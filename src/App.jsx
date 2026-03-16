@@ -903,7 +903,7 @@ function PracticeCard({ card, onReview, onSkip, totalDue }) {
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.keyword, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
               {t.portuguese}
             </div>
-            <div style={{ fontFamily: font.display, fontSize: mobile ? 28 : 38, fontWeight: 400, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
+            <div style={{ fontFamily: font.display, fontSize: mobile ? 28 : 24, fontWeight: 400, color: T.text, lineHeight: 1.2, marginBottom: 6 }}>
               {card.word}
             </div>
             {card.phrase && (
