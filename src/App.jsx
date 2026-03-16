@@ -1409,17 +1409,17 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
               {studyDirection === "en-pt" ? t.english : t.portuguese}
             </div>
             {studyDirection === "en-pt" ? (
-              <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4 }}>
+              <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
                 {card.translation}
               </div>
             ) : (
               <>
                 {card.phrase ? (
-                  <div style={{ maxWidth: mobile ? "100%" : 380 }}>
+                  <div style={{ maxWidth: mobile ? "100%" : 760 }}>
                     <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
                   </div>
                 ) : (
-                  <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4 }}>
+                  <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
                     {card.word}
                   </div>
                 )}
@@ -1449,11 +1449,11 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
             {studyDirection === "en-pt" ? (
               <>
                 {card.phrase ? (
-                  <div style={{ maxWidth: mobile ? "100%" : 380 }}>
+                  <div style={{ maxWidth: mobile ? "100%" : 760 }}>
                     <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
                   </div>
                 ) : (
-                  <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4 }}>
+                  <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
                     {card.word}
                   </div>
                 )}
@@ -1471,7 +1471,7 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
                 </button>
               </>
             ) : (
-              <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4 }}>
+              <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
                 {card.translation}
               </div>
             )}
