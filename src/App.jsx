@@ -3264,7 +3264,7 @@ export default function VocabApp() {
                 nenhuma palavra adicionada ainda
               </div>
             ) : (
-              <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard, boxShadow: T.shadow }}>
+              <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard, boxShadow: mobile ? "none" : T.shadow }}>
                 <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 2fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
                   {[
                     { key: "word", label: t.headerPalavra },
