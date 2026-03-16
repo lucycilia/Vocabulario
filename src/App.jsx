@@ -456,6 +456,7 @@ const i18n = {
     sheetsLastSync: "Última sincronização",
     enToPt: "EN → PT",
     ptToEn: "PT → EN",
+    searchPlaceholder: "buscar palavras ou frases...",
   },
   en: {
     practice: "practice",
@@ -581,6 +582,7 @@ const i18n = {
     sheetsLastSync: "Last synced",
     enToPt: "EN → PT",
     ptToEn: "PT → EN",
+    searchPlaceholder: "search words or phrases...",
   },
 };
 let t = i18n["pt-BR"];
@@ -2098,6 +2100,7 @@ export default function VocabApp() {
   const [deletedCards, setDeletedCards] = useState({});
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState("asc");
+  const [searchQuery, setSearchQuery] = useState("");
   const [activityRange, setActivityRange] = useState("month");
   const [studyDirection, setStudyDirection] = useState("en-pt");
   const [settings, setSettings] = useState({
@@ -2335,6 +2338,12 @@ export default function VocabApp() {
     if (va > vb) return sortDir === "asc" ? 1 : -1;
     return 0;
   });
+  const filteredCards = searchQuery.trim()
+    ? sortedCards.filter((c) => {
+        const q = searchQuery.toLowerCase();
+        return (c.word || "").toLowerCase().includes(q) || (c.translation || "").toLowerCase().includes(q) || (c.phrase || "").toLowerCase().includes(q);
+      })
+    : sortedCards;
   if (!loaded) {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -2485,7 +2494,7 @@ export default function VocabApp() {
                   }
                 </div>
                 {cards.length === 0 && (
-                  <button onClick={() => { setView("words"); setShowAddInline(true); }} style={{
+                  <button onClick={() => { setView("words"); setShowImportInline(true); }} style={{
                     padding: "13px 32px", background: T.accent, border: "none", borderRadius: T.radiusSm,
                     color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3,
                   }}>
@@ -2539,44 +2548,45 @@ export default function VocabApp() {
         )}
         {view === "words" && (
           <>
-            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 20 }}>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => setShowImportInline(true)}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+              <div style={{ position: "relative", flex: 1 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textPlaceholder} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t.searchPlaceholder || "buscar..."}
                   style={{
-                    padding: "9px 18px",
-                    background: "transparent",
-                    border: `1px solid ${T.border}`,
-                    borderRadius: T.radiusSm,
-                    color: T.textSecondary,
-                    fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
-                    display: "flex", alignItems: "center", gap: 6,
+                    width: "100%", boxSizing: "border-box",
+                    padding: "9px 12px 9px 36px",
+                    background: T.bgInput, border: `1px solid ${T.border}`,
+                    borderRadius: T.radiusSm, color: T.text,
+                    fontFamily: font.body, fontSize: 13, outline: "none",
+                    transition: "border-color 0.15s",
                   }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  importar
-                </button>
-                <button
-                  onClick={() => setShowAddInline(true)}
-                  style={{
-                    padding: "9px 18px", background: T.accent,
-                    border: "none",
-                    borderRadius: T.radiusSm,
-                    color: T.bg,
-                    fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
-                  }}
-                >
-                  + novo
-                </button>
+                  onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
+                  onBlur={(e) => { e.target.style.borderColor = T.border; }}
+                />
               </div>
+              <button
+                onClick={() => setShowImportInline(true)}
+                style={{
+                  padding: "9px 18px", background: T.accent,
+                  border: "none",
+                  borderRadius: T.radiusSm,
+                  color: T.bg,
+                  fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
+                  display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                {t.import}
+              </button>
             </div>
-            <Modal open={showAddInline} onClose={() => setShowAddInline(false)} title={t.newWordTitle}>
-              <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 28, boxShadow: T.shadow }}>
-                <AddCardForm onAdd={(card) => { addCard(card); setShowAddInline(false); }} onCancel={() => setShowAddInline(false)} />
-              </div>
-            </Modal>
             <Modal open={showImportInline} onClose={() => setShowImportInline(false)} title={t.importWords}>
               <ImportPanel onImport={(newCards) => { addCards(newCards); setShowImportInline(false); }} existingCount={cards.length} />
             </Modal>
@@ -2623,7 +2633,7 @@ export default function VocabApp() {
                     </span>
                   ))}
                 </div>
-                {sortedCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} />)}
+                {filteredCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} />)}
               </div>
             )}
           </>
