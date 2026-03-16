@@ -2992,6 +2992,7 @@ export default function VocabApp() {
     );
   }
   const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
+  const practiceBadgeMobile = dueReview > 0 ? `D${dueReview}` : null;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
     { id: "words", label: t.words, badge: cards.length || null },
@@ -4042,7 +4043,7 @@ export default function VocabApp() {
           zIndex: 1000,
         }}>
           {[
-            { id: "practice", label: t.practice, badge: practiceBadge, icon: (active) => (
+            { id: "practice", label: t.practice, badge: practiceBadgeMobile, icon: (active) => (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12H17V17C17 19.7614 14.7614 22 12 22H10C7.23858 22 5 19.7614 5 17V12Z"/><path d="M17 13H19C20.1046 13 21 13.8954 21 15V15C21 16.1046 20.1046 17 19 17H17"/><path d="M9 9C9 9 8 8.5 8 7C8 5.5 9 5 9 5"/><path d="M12 3C12 3 13 3.5 13 5C13 6.5 12 7 12 7"/>
               </svg>
@@ -4072,10 +4073,21 @@ export default function VocabApp() {
                   flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
                   background: active ? (settings.theme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)") : "none", border: "none",
                   borderRadius: 9999, padding: "6px 4px",
-                  cursor: "pointer", position: "relative",
+                  cursor: "pointer",
                 }}
               >
-                {tab.icon(active)}
+                <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                  {tab.icon(active)}
+                  {tab.badge && (
+                    <span style={{
+                      background: T.accent, color: T.bg,
+                      fontFamily: font.mono, fontSize: 7, fontWeight: 600,
+                      padding: "1px 4px", borderRadius: 9999, whiteSpace: "nowrap",
+                    }}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </span>
                 <span style={{
                   fontFamily: font.body, fontSize: 9, fontWeight: active ? 700 : 500,
                   color: active ? T.text : T.textTertiary,
@@ -4083,16 +4095,6 @@ export default function VocabApp() {
                 }}>
                   {tab.label}
                 </span>
-                {tab.badge && (
-                  <span style={{
-                    position: "absolute", top: 1, right: "50%", transform: "translateX(14px)",
-                    background: T.accent, color: T.bg,
-                    fontFamily: font.mono, fontSize: 7, fontWeight: 600,
-                    padding: "1px 4px", borderRadius: 9999, whiteSpace: "nowrap",
-                  }}>
-                    {tab.badge}
-                  </span>
-                )}
               </button>
             );
           })}
