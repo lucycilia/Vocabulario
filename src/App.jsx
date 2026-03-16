@@ -166,6 +166,7 @@ const stageLabel = (stage) => {
   return t[map[stage]] || stage;
 };
 // ─── Import Parsers ───
+const looksPortuguese = (text) => /[ãõçêéáíóúâô]/i.test(text);
 const parseImportLine = (line) => {
   line = line.trim();
   if (!line || line.startsWith("#") || line.startsWith("//")) return null;
@@ -190,8 +191,11 @@ const parseImportLine = (line) => {
     parts = line.split(";").map(s => s.trim());
   }
   if (!parts || parts.length < 2) return null;
-  const ptSide = parts[0].trim();
-  const enSide = parts.slice(1).join(", ").trim();
+  let ptSide = parts[0].trim();
+  let enSide = parts.slice(1).join(", ").trim();
+  if (!looksPortuguese(ptSide) && looksPortuguese(enSide)) {
+    [ptSide, enSide] = [enSide, ptSide];
+  }
   if (!ptSide || !enSide) return null;
   const cleanEn = enSide.replace(/\*\*/g, "").trim();
   const boldMatch = ptSide.match(/\*\*(.+?)\*\*/);
