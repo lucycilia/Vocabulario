@@ -4043,23 +4043,23 @@ export default function VocabApp() {
         }}>
           {[
             { id: "practice", label: t.practice, badge: practiceBadge, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12H17V17C17 19.7614 14.7614 22 12 22H10C7.23858 22 5 19.7614 5 17V12Z"/><path d="M17 13H19C20.1046 13 21 13.8954 21 15V15C21 16.1046 20.1046 17 19 17H17"/><path d="M9 9C9 9 8 8.5 8 7C8 5.5 9 5 9 5"/><path d="M12 3C12 3 13 3.5 13 5C13 6.5 12 7 12 7"/>
               </svg>
             )},
             { id: "words", label: t.words, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 6s-2-2-4-2-5 2-5 2v14s3-2 5-2 4 2 4 2c1.333-1.333 2.667-2 4-2 1.333 0 3 .667 5 2V6c-2-1.333-3.667-2-5-2-1.333 0-2.667.667-4 2z"/><path strokeLinecap="round" d="M12 6v14"/>
               </svg>
             )},
             { id: "chat", label: t.chat, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8.82388455,18.5880577 L4,21 L4.65322944,16.4273939 C3.00629211,15.0013 2,13.0946628 2,11 C2,6.581722 6.4771525,3 12,3 C17.5228475,3 22,6.581722 22,11 C22,15.418278 17.5228475,19 12,19 C10.8897425,19 9.82174472,18.8552518 8.82388455,18.5880577 Z"/>
               </svg>
             )},
             { id: "heatmap", label: t.progress, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? T.text : "none"} stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 14l8-11v7h5l-8 11v-7z"/>
               </svg>
             )},
           ].map((tab) => {
