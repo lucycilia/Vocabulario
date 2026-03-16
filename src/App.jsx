@@ -2908,6 +2908,8 @@ export default function VocabApp() {
       (c.word || "").toLowerCase().includes(q) || (c.translation || "").toLowerCase().includes(q) || (c.phrase || "").toLowerCase().includes(q)
     );
   }, [sortedCards, searchQuery]);
+  const dueReview = useMemo(() => dueCards.filter(c => c.reps > 0).length, [dueCards]);
+  const dueNew = useMemo(() => dueCards.filter(c => c.reps === 0).length, [dueCards]);
   if (!loaded) {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -2915,8 +2917,6 @@ export default function VocabApp() {
       </div>
     );
   }
-  const dueReview = useMemo(() => dueCards.filter(c => c.reps > 0).length, [dueCards]);
-  const dueNew = useMemo(() => dueCards.filter(c => c.reps === 0).length, [dueCards]);
   const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
