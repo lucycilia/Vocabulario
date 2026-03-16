@@ -908,8 +908,8 @@ const i18n = {
     cardOrderDesc: "Como as cartas aparecem durante a prática.",
     cardOrderDue: "Por data de revisão",
     cardOrderDueDesc: "Mais atrasadas primeiro",
-    cardOrderRandom: "Aleatório",
-    cardOrderRandomDesc: "Ordem diferente cada dia",
+    cardOrderNewest: "Mais recentes primeiro",
+    cardOrderNewestDesc: "Cartões adicionados recentemente primeiro",
     exportData: "Exportar dados",
     exportDataDesc: "Baixe todas as suas cartas como arquivo CSV.",
     exportButton: "exportar",
@@ -1037,8 +1037,8 @@ const i18n = {
     cardOrderDesc: "How cards appear during practice.",
     cardOrderDue: "By due date",
     cardOrderDueDesc: "Most overdue first",
-    cardOrderRandom: "Random",
-    cardOrderRandomDesc: "Different order each day",
+    cardOrderNewest: "Newest first",
+    cardOrderNewestDesc: "Recently added cards first",
     exportData: "Export data",
     exportDataDesc: "Download all your cards as a CSV file.",
     exportButton: "export",
@@ -2947,16 +2947,8 @@ export default function VocabApp() {
   const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };
   const dueCards = useMemo(() => {
     let due = cards.filter((c) => c.dueDate <= today() && !skippedIds.has(c.id));
-    if (settings.cardOrder === "random") {
-      const seed = today().replace(/-/g, "") | 0;
-      const shuffled = [...due];
-      let m = shuffled.length, t, i, s = seed;
-      while (m) {
-        s = (s * 1103515245 + 12345) & 0x7fffffff;
-        i = s % m--;
-        t = shuffled[m]; shuffled[m] = shuffled[i]; shuffled[i] = t;
-      }
-      return shuffled;
+    if (settings.cardOrder === "newest") {
+      return due.sort((a, b) => b.id.localeCompare(a.id));
     }
     return due.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   }, [cards, skippedIds, settings.cardOrder]);
@@ -3759,7 +3751,7 @@ export default function VocabApp() {
                   <div style={{ display: "flex", gap: 10 }}>
                     {[
                       { id: "due", label: t.cardOrderDue, desc: t.cardOrderDueDesc },
-                      { id: "random", label: t.cardOrderRandom, desc: t.cardOrderRandomDesc },
+                      { id: "newest", label: t.cardOrderNewest, desc: t.cardOrderNewestDesc },
                     ].map((opt) => (
                       <button
                         key={opt.id}
