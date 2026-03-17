@@ -3444,7 +3444,7 @@ export default function VocabApp() {
               const recallChartData = recallBands.filter(b => b.count > 0).map(b => ({ name: b.label, value: b.count, fill: b.color }));
               return (
                 <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: 14, marginBottom: 14 }}>
-                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 16 : 28, boxShadow: T.shadow }}>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 24px" : 28, boxShadow: T.shadow }}>
                   <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
                     {t.stageBreakdown}
                   </div>
@@ -3530,7 +3530,7 @@ export default function VocabApp() {
                     </div>
                   </div>
                 </div>
-                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 16 : 28, boxShadow: T.shadow }}>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 24px" : 28, boxShadow: T.shadow }}>
                   <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
                     {t.recallRate}
                   </div>
