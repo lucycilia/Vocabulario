@@ -93,9 +93,9 @@ const FSRS = {
     stability: 0,
     difficulty: 0,
     reps: 0,
-    dueDate: new Date().toISOString().split("T")[0],
+    dueDate: localDateStr(),
     lastReview: null,
-    created: new Date().toISOString().split("T")[0],
+    created: localDateStr(),
     modifiedAt: Date.now(),
   }),
   // Review a card with a grade (1=Forgot, 2=Hard, 3=Good, 4=Easy)
@@ -127,8 +127,8 @@ const FSRS = {
       stability: s,
       difficulty: d,
       reps: reps + 1,
-      dueDate: due.toISOString().split("T")[0],
-      lastReview: new Date().toISOString().split("T")[0],
+      dueDate: localDateStr(due),
+      lastReview: localDateStr(),
       modifiedAt: Date.now(),
     };
   },
@@ -722,7 +722,7 @@ const applyRemnoteDueDates = (cards) => {
       if (dueMatch) {
         updated++;
         // Use real lastReview if available, otherwise fall back to today
-        const reviewDate = lastPracticed || new Date().toISOString().split("T")[0];
+        const reviewDate = lastPracticed || localDateStr();
         // Calculate stability from real interval: dueDate - lastReview
         const dueMs = new Date(dueMatch.dueDate + "T12:00:00");
         const reviewMs = new Date(reviewDate + "T12:00:00");
@@ -752,13 +752,14 @@ const applyRemnoteDueDates = (cards) => {
   return { cards: result, practiceDayCounts };
 };
 // ─── Date Helpers ───
-const today = () => new Date().toISOString().split("T")[0];
+const localDateStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const today = () => localDateStr();
 const normalizeDate = (v) => {
   if (!v) return "";
   const s = String(v);
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const d = new Date(s);
-  if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+  if (!isNaN(d.getTime())) return localDateStr(d);
   return "";
 };
 const getDaysInYear = (year) => {
@@ -766,7 +767,7 @@ const getDaysInYear = (year) => {
   const end = new Date(year, 11, 31);
   const days = [];
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    days.push(new Date(d).toISOString().split("T")[0]);
+    days.push(localDateStr(new Date(d)));
   }
   return days;
 };
@@ -1164,7 +1165,7 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
     let streak = 0;
     let d = new Date();
     while (true) {
-      const ds = d.toISOString().split("T")[0];
+      const ds = localDateStr(d);
       if (practiceDays[ds] && practiceDays[ds] > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
     }
     return streak;
@@ -3507,7 +3508,7 @@ export default function VocabApp() {
                   let streak = 0;
                   let d = new Date();
                   while (true) {
-                    const ds = d.toISOString().split("T")[0];
+                    const ds = localDateStr(d);
                     if (practiceDays[ds] && practiceDays[ds] > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
                   }
                   return streak;
@@ -3757,7 +3758,7 @@ export default function VocabApp() {
               for (let i = daysBack - 1; i >= 0; i--) {
                 const d = new Date(now);
                 d.setDate(d.getDate() - i);
-                const ds = d.toISOString().split("T")[0];
+                const ds = localDateStr(d);
                 chartData.push({
                   date: ds,
                   reviews: practiceDays[ds] || 0,
