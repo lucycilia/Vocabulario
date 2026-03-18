@@ -134,7 +134,7 @@ const FSRS = {
   },
 };
 // ─── Brazilian Portuguese TTS ───
-const speakPT = (text) => {
+const speakPT = (text, onEnd) => {
   if (!("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(text);
@@ -145,7 +145,11 @@ const speakPT = (text) => {
   if (ptBR) utter.voice = ptBR;
   utter.lang = "pt-BR";
   utter.rate = 0.88;
+  if (onEnd) { utter.onend = onEnd; utter.onerror = onEnd; }
   return window.speechSynthesis.speak(utter);
+};
+const stopPT = () => {
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 };
 // ─── Memory Stages ───
 const getStage = (card) => {
@@ -854,6 +858,7 @@ const i18n = {
     nextReview: "próxima revisão",
     tapToReveal: "toque para revelar",
     listenPronunciation: "ouvir pronúncia",
+    stopPronunciation: "parar",
     skip: "Pular",
     forgot: "Esqueci",
     partiallyRecalled: "Parcialmente",
@@ -989,6 +994,7 @@ const i18n = {
     nextReview: "next review",
     tapToReveal: "tap to reveal",
     listenPronunciation: "listen to pronunciation",
+    stopPronunciation: "stop",
     skip: "Skip",
     forgot: "Forgot",
     partiallyRecalled: "Partially recalled",
@@ -1314,6 +1320,13 @@ function SpeakerIcon({ size = 18, color = T.textTertiary }) {
     </svg>
   );
 }
+function StopIcon({ size = 18, color = T.textTertiary }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
 // ─── Add Card Form ───
 function AddCardForm({ onAdd, onCancel }) {
   const [ptText, setPtText] = useState("");
@@ -1434,7 +1447,14 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const handleSpeak = (text) => {
+    if (isSpeaking) { stopPT(); setIsSpeaking(false); return; }
+    setIsSpeaking(true);
+    speakPT(text, () => setIsSpeaking(false));
+  };
   const handleReview = (quality) => {
+    stopPT(); setIsSpeaking(false);
     if (quality === 0) {
       setExiting(true);
       setTimeout(() => { onSkip(card.id); setFlipped(false); setExiting(false); }, 280);
@@ -1493,18 +1513,18 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
                   </div>
                 )}
                 <button
-                  onClick={(e) => { e.stopPropagation(); speakPT(card.phrase || card.word); }}
+                  onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
                   style={{
-                    marginTop: 24, background: T.accentSoft, border: `1px solid ${T.border}`,
-                    borderRadius: 24, padding: "9px 22px", color: T.textSecondary,
+                    marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
+                    borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
                     fontFamily: font.body, fontSize: 13, cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.accentSoft; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
                 >
-                  <SpeakerIcon size={16} color={T.textSecondary} />
-                  {t.listenPronunciation}
+                  {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
+                  {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
                 </button>
               </>
             )}
@@ -1529,18 +1549,18 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
                   </div>
                 )}
                 <button
-                  onClick={(e) => { e.stopPropagation(); speakPT(card.phrase || card.word); }}
+                  onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
                   style={{
-                    marginTop: 24, background: T.accentSoft, border: `1px solid ${T.border}`,
-                    borderRadius: 24, padding: "9px 22px", color: T.textSecondary,
+                    marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
+                    borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
                     fontFamily: font.body, fontSize: 13, cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.accentSoft; }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
                 >
-                  <SpeakerIcon size={16} color={T.textSecondary} />
-                  {t.listenPronunciation}
+                  {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
+                  {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
                 </button>
               </>
             ) : (
