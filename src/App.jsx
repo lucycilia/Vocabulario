@@ -895,6 +895,8 @@ const i18n = {
     boldWarning: "Use **asteriscos** ao redor da palavra-chave",
     addButton: "adicionar",
     cancel: "cancelar",
+    save: "salvar",
+    editBoldHint: "Use negrito (Ctrl+B) para a palavra-chave",
     headerPalavra: "Palavra",
     headerEnglish: "Inglês",
     headerPortuguese: "Português",
@@ -1031,6 +1033,8 @@ const i18n = {
     boldWarning: "Use **asterisks** around the keyword",
     addButton: "add",
     cancel: "cancel",
+    save: "save",
+    editBoldHint: "Use bold (Ctrl+B) for keyword",
     headerPalavra: "Keyword",
     headerEnglish: "English",
     headerPortuguese: "Portuguese",
@@ -1293,6 +1297,25 @@ const yearBtnStyle = {
   fontSize: 13,
   lineHeight: 1,
 };
+// ─── HTML Bold Parser ───
+const parseHtmlBold = (html) => {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  let plain = "";
+  let kwStart = null, kwEnd = null, kwText = "";
+  const walk = (node) => {
+    if (node.nodeType === 3) { plain += node.textContent; }
+    else if (node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase();
+      const isBold = tag === "b" || tag === "strong" || (node.style && node.style.fontWeight && parseInt(node.style.fontWeight) >= 700);
+      if (isBold && kwStart === null) kwStart = plain.length;
+      for (const child of node.childNodes) walk(child);
+      if (isBold && kwStart !== null && kwEnd === null) { kwEnd = plain.length; kwText = plain.slice(kwStart, kwEnd); }
+    }
+  };
+  for (const child of tmp.childNodes) walk(child);
+  return { plain, kwStart, kwEnd, kwText };
+};
 // ─── Phrase Display ───
 function PhraseDisplay({ phrase, keywordStart, keywordEnd, size = "normal" }) {
   if (!phrase) return null;
@@ -1324,6 +1347,14 @@ function StopIcon({ size = 18, color = T.textTertiary }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
       <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+function PencilIcon({ size = 18, color = T.textTertiary }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
     </svg>
   );
 }
@@ -1443,11 +1474,53 @@ function AddCardForm({ onAdd, onCancel }) {
   );
 }
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirection }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editPt, setEditPt] = useState("");
+  const [editEn, setEditEn] = useState("");
+  const ptRef = useRef(null);
+  const enRef = useRef(null);
+  const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const startEdit = (e) => {
+    e.stopPropagation();
+    if (card.phrase && card.keywordStart !== undefined && card.keywordEnd !== undefined && card.keywordStart !== card.keywordEnd) {
+      const before = card.phrase.slice(0, card.keywordStart);
+      const kw = card.phrase.slice(card.keywordStart, card.keywordEnd);
+      const after = card.phrase.slice(card.keywordEnd);
+      setEditPt(escHtml(before) + "<b>" + escHtml(kw) + "</b>" + escHtml(after));
+    } else {
+      setEditPt(escHtml(card.word || ""));
+    }
+    setEditEn(escHtml(card.translation || ""));
+    setEditing(true);
+  };
+  const saveEdit = () => {
+    const ptHtml = ptRef.current ? ptRef.current.innerHTML : editPt;
+    const enHtml = enRef.current ? enRef.current.innerHTML : editEn;
+    const { plain, kwStart, kwEnd, kwText } = parseHtmlBold(ptHtml);
+    const updated = {};
+    if (kwStart !== null && kwEnd !== null && kwText) {
+      updated.phrase = plain;
+      updated.word = kwText;
+      updated.keywordStart = kwStart;
+      updated.keywordEnd = kwEnd;
+    } else {
+      updated.word = plain;
+      updated.phrase = "";
+      updated.keywordStart = 0;
+      updated.keywordEnd = 0;
+    }
+    const tmp = document.createElement("div");
+    tmp.innerHTML = enHtml;
+    updated.translation = tmp.textContent || "";
+    onUpdate(card.id, updated);
+    setEditing(false);
+  };
+  const cancelEdit = (e) => { e.stopPropagation(); setEditing(false); };
   const handleSpeak = (text) => {
     if (isSpeaking) { stopPT(); setIsSpeaking(false); return; }
     setIsSpeaking(true);
@@ -1473,13 +1546,14 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
   return (
     <div style={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(-16px)" : "translateY(0)", transition: "all 0.28s ease" }}>
       <div
-        onClick={() => { if (!flipped) { setFlipped(true); } }}
+        onClick={() => { if (!flipped && !editing) { setFlipped(true); } }}
         style={{
+          position: "relative",
           background: T.bgCard,
           border: `1px solid ${T.border}`,
           borderRadius: T.radius,
           padding: mobile ? "36px 20px" : "56px 40px",
-          cursor: flipped ? "default" : "pointer",
+          cursor: editing ? "default" : flipped ? "default" : "pointer",
           minHeight: mobile ? 180 : 240,
           display: "flex",
           flexDirection: "column",
@@ -1489,10 +1563,83 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
           boxShadow: T.shadowLg,
           transition: "all 0.3s",
         }}
-        onMouseEnter={(e) => { if (!flipped) e.currentTarget.style.borderColor = T.borderStrong; }}
+        onMouseEnter={(e) => { if (!flipped && !editing) e.currentTarget.style.borderColor = T.borderStrong; }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
       >
-        {!flipped ? (
+        {!editing && onUpdate && (
+          <button
+            onClick={startEdit}
+            aria-label="Edit card"
+            style={{
+              position: "absolute", top: mobile ? 10 : 14, right: mobile ? 10 : 14,
+              background: "transparent", border: "none", cursor: "pointer",
+              padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
+          >
+            <PencilIcon size={16} color={T.textSecondary} />
+          </button>
+        )}
+        {editing ? (
+          <div style={{ width: "100%", maxWidth: mobile ? "100%" : 500, textAlign: "left" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 8 }}>
+              {t.portuguese}
+            </div>
+            <div
+              ref={ptRef}
+              contentEditable
+              suppressContentEditableWarning
+              dangerouslySetInnerHTML={{ __html: editPt }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
+              style={{
+                padding: "10px 12px", background: T.bgInput, border: `1px solid ${T.border}`,
+                borderRadius: T.radiusSm, color: T.text, fontFamily: font.body, fontSize: 16,
+                outline: "none", minHeight: 40, marginBottom: 6, lineHeight: 1.5,
+                wordBreak: "break-word", whiteSpace: "pre-wrap",
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = T.border; }}
+            />
+            <div style={{ fontFamily: font.mono, fontSize: 9, color: T.textPlaceholder, marginBottom: 16 }}>
+              {t.editBoldHint}
+            </div>
+            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 8 }}>
+              {t.english}
+            </div>
+            <div
+              ref={enRef}
+              contentEditable
+              suppressContentEditableWarning
+              dangerouslySetInnerHTML={{ __html: editEn }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
+              style={{
+                padding: "10px 12px", background: T.bgInput, border: `1px solid ${T.border}`,
+                borderRadius: T.radiusSm, color: T.text, fontFamily: font.body, fontSize: 16,
+                outline: "none", minHeight: 40, marginBottom: 20, lineHeight: 1.5,
+                wordBreak: "break-word", whiteSpace: "pre-wrap",
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = T.border; }}
+            />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={cancelEdit} style={{
+                padding: "8px 20px", background: "transparent", border: `1px solid ${T.border}`,
+                borderRadius: T.radiusSm, color: T.textSecondary, fontFamily: font.body,
+                fontSize: 13, cursor: "pointer", transition: "all 0.15s",
+              }}>
+                {t.cancel}
+              </button>
+              <button onClick={saveEdit} style={{
+                padding: "8px 20px", background: T.accent, border: "none",
+                borderRadius: T.radiusSm, color: "#fff", fontFamily: font.body,
+                fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
+              }}>
+                {t.save}
+              </button>
+            </div>
+          </div>
+        ) : !flipped ? (
           <>
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
               {studyDirection === "en-pt" ? t.english : t.portuguese}
@@ -1571,7 +1718,7 @@ function PracticeCard({ card, onReview, onSkip, totalDue, studyDirection }) {
           </>
         )}
       </div>
-      {flipped && (
+      {flipped && !editing && (
         <div style={{ display: "flex", flexWrap: mobile ? "wrap" : "nowrap", gap: 8, marginTop: 16 }}>
           {qualityButtons.map((btn) => (
             <button
@@ -1631,24 +1778,6 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
       return escHtml(before) + "<b>" + escHtml(kw) + "</b>" + escHtml(after);
     }
     return escHtml(card.word || "");
-  };
-  const parseHtmlBold = (html) => {
-    const tmp = document.createElement("div");
-    tmp.innerHTML = html;
-    let plain = "";
-    let kwStart = null, kwEnd = null, kwText = "";
-    const walk = (node) => {
-      if (node.nodeType === 3) { plain += node.textContent; }
-      else if (node.nodeType === 1) {
-        const tag = node.tagName.toLowerCase();
-        const isBold = tag === "b" || tag === "strong" || (node.style && node.style.fontWeight && parseInt(node.style.fontWeight) >= 700);
-        if (isBold && kwStart === null) kwStart = plain.length;
-        for (const child of node.childNodes) walk(child);
-        if (isBold && kwStart !== null && kwEnd === null) { kwEnd = plain.length; kwText = plain.slice(kwStart, kwEnd); }
-      }
-    };
-    for (const child of tmp.childNodes) walk(child);
-    return { plain, kwStart, kwEnd, kwText };
   };
   const commitEn = (html) => {
     const tmp = document.createElement("div");
@@ -2055,32 +2184,6 @@ function ImportPanel({ onImport, existingCount }) {
     return "";
   };
   const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const parseHtmlBold = (html) => {
-    const tmp = document.createElement("div");
-    tmp.innerHTML = html;
-    let plain = "";
-    let kwStart = null;
-    let kwEnd = null;
-    let kwText = "";
-    const walk = (node) => {
-      if (node.nodeType === 3) {
-        plain += node.textContent;
-      } else if (node.nodeType === 1) {
-        const tag = node.tagName.toLowerCase();
-        const isBold = tag === "b" || tag === "strong" || (node.style && node.style.fontWeight && parseInt(node.style.fontWeight) >= 700);
-        if (isBold && kwStart === null) {
-          kwStart = plain.length;
-        }
-        for (const child of node.childNodes) walk(child);
-        if (isBold && kwStart !== null && kwEnd === null) {
-          kwEnd = plain.length;
-          kwText = plain.slice(kwStart, kwEnd);
-        }
-      }
-    };
-    for (const child of tmp.childNodes) walk(child);
-    return { plain, kwStart, kwEnd, kwText };
-  };
   const commitCell = (i, field, html) => {
     setResults((prev) => {
       const next = [...prev];
@@ -3201,7 +3304,7 @@ export default function VocabApp() {
                     ))}
                   </div>
                 </div>
-                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} totalDue={dueCards.length} studyDirection={studyDirection} />
+                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} totalDue={dueCards.length} studyDirection={studyDirection} />
                 {(dueReview > 0 || dueNew > 0) && (
                   <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
                     <span style={{
