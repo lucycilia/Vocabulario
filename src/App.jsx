@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -132,6 +132,29 @@ const FSRS = {
       modifiedAt: Date.now(),
     };
   },
+};
+// ─── Text Similarity (Levenshtein) ───
+const textSimilarity = (a, b) => {
+  const norm = (s) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const x = norm(a), y = norm(b);
+  if (x === y) return 100;
+  if (!x || !y) return 0;
+  const m = x.length, n = y.length;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      curr[j] = x[i - 1] === y[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+    }
+    prev = curr;
+  }
+  return Math.round((1 - prev[n] / Math.max(m, n)) * 100);
+};
+const computeScore = (userAnswer, card, studyDirection) => {
+  if (studyDirection === "pt-en") return textSimilarity(userAnswer, card.translation);
+  const wordScore = textSimilarity(userAnswer, card.word);
+  const phraseScore = card.phrase ? textSimilarity(userAnswer, card.phrase) : 0;
+  return Math.max(wordScore, phraseScore);
 };
 // ─── Brazilian Portuguese TTS ───
 const speakPT = (text, onEnd) => {
@@ -858,6 +881,15 @@ const i18n = {
     addWordsToStart: "adicione palavras para começar a praticar",
     nextReview: "próxima revisão",
     tapToReveal: "toque para revelar",
+    modePassive: "Revelar",
+    modeType: "Digitar",
+    modeWrite: "Escrever",
+    typeAnswerPt: "Digite em português...",
+    typeAnswerEn: "Digite em inglês...",
+    check: "Verificar",
+    yourAnswer: "Sua resposta",
+    clear: "Limpar",
+    writeHint: "escreva sua resposta, depois toque para revelar",
     listenPronunciation: "ouvir pronúncia",
     stopPronunciation: "parar",
     skip: "Pular",
@@ -996,6 +1028,15 @@ const i18n = {
     addWordsToStart: "add words to start practising",
     nextReview: "next review",
     tapToReveal: "tap to reveal",
+    modePassive: "Reveal",
+    modeType: "Type",
+    modeWrite: "Write",
+    typeAnswerPt: "Type in Portuguese...",
+    typeAnswerEn: "Type in English...",
+    check: "Check",
+    yourAnswer: "Your answer",
+    clear: "Clear",
+    writeHint: "write your answer, then tap to reveal",
     listenPronunciation: "listen to pronunciation",
     stopPronunciation: "stop",
     skip: "Skip",
@@ -1474,8 +1515,104 @@ function AddCardForm({ onAdd, onCancel }) {
     </div>
   );
 }
+// ─── Drawing Canvas ───
+const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, ref) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const mobile = useIsMobile();
+
+  useImperativeHandle(ref, () => ({
+    clear: () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    },
+  }));
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = T.text;
+  }, []);
+
+  const getPos = (e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const onPointerDown = (e) => {
+    drawing.current = true;
+    canvasRef.current.setPointerCapture(e.pointerId);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.strokeStyle = T.text;
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineWidth = 1.5 + (e.pressure || 0.5) * 3;
+  };
+
+  const onPointerMove = (e) => {
+    if (!drawing.current) return;
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.lineWidth = 1.5 + (e.pressure || 0.5) * 3;
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const onPointerUp = () => { drawing.current = false; };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <canvas
+        ref={canvasRef}
+        style={{
+          width: "100%", height, display: "block",
+          background: T.bgInput, borderRadius: T.radiusSm,
+          border: `1px solid ${T.border}`, touchAction: "none",
+          cursor: "crosshair",
+        }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+      />
+      <button
+        onClick={handleClear}
+        style={{
+          position: "absolute", top: 8, right: 8,
+          background: T.bgCard, border: `1px solid ${T.border}`,
+          borderRadius: T.radiusSm, padding: "4px 12px",
+          fontFamily: font.mono, fontSize: 11, color: T.textTertiary,
+          cursor: "pointer", transition: "all 0.15s",
+        }}
+      >
+        {t.clear}
+      </button>
+    </div>
+  );
+}));
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirection }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirection, answerMode = "passive" }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -1483,8 +1620,17 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
   const [editing, setEditing] = useState(false);
   const [editPt, setEditPt] = useState("");
   const [editEn, setEditEn] = useState("");
+  const [userAnswer, setUserAnswer] = useState("");
+  const [score, setScore] = useState(null);
+  const drawRef = useRef(null);
   const ptRef = useRef(null);
   const enRef = useRef(null);
+  const handleCheck = (e) => {
+    if (e) e.stopPropagation();
+    const s = computeScore(userAnswer, card, studyDirection);
+    setScore(s);
+    setFlipped(true);
+  };
   const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const startEdit = (e) => {
     e.stopPropagation();
@@ -1547,14 +1693,14 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
   return (
     <div style={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(-16px)" : "translateY(0)", transition: "all 0.28s ease" }}>
       <div
-        onClick={() => { if (!flipped && !editing) { setFlipped(true); } }}
+        onClick={() => { if (!flipped && !editing && answerMode !== "type") { setFlipped(true); } }}
         style={{
           position: "relative",
           background: T.bgCard,
           border: `1px solid ${T.border}`,
           borderRadius: T.radius,
           padding: mobile ? "36px 20px" : "56px 40px",
-          cursor: editing ? "default" : flipped ? "default" : "pointer",
+          cursor: editing ? "default" : flipped ? "default" : answerMode === "type" ? "default" : "pointer",
           minHeight: mobile ? 180 : 240,
           display: "flex",
           flexDirection: "column",
@@ -1676,9 +1822,46 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
                 </button>
               </>
             )}
-            <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 32, letterSpacing: 0.5 }}>
-              {t.tapToReveal}
-            </div>
+            {answerMode === "type" ? (
+              <div style={{ marginTop: 24, width: "100%", maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="text"
+                  value={userAnswer}
+                  onChange={(e) => setUserAnswer(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && userAnswer.trim()) handleCheck(e); }}
+                  placeholder={studyDirection === "en-pt" ? t.typeAnswerPt : t.typeAnswerEn}
+                  autoFocus
+                  style={{
+                    width: "100%", padding: "12px 16px", boxSizing: "border-box",
+                    background: T.bgInput, border: `1px solid ${T.border}`,
+                    borderRadius: T.radiusSm, color: T.text,
+                    fontFamily: font.body, fontSize: 16, outline: "none",
+                    transition: "border-color 0.2s",
+                  }}
+                  onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
+                  onBlur={(e) => { e.target.style.borderColor = T.border; }}
+                />
+                <button
+                  onClick={handleCheck}
+                  disabled={!userAnswer.trim()}
+                  style={{
+                    marginTop: 10, padding: "10px 28px",
+                    background: userAnswer.trim() ? T.accent : T.bgInput,
+                    border: "none", borderRadius: T.radiusSm,
+                    color: userAnswer.trim() ? "#fff" : T.textPlaceholder,
+                    fontFamily: font.body, fontSize: 14, fontWeight: 600,
+                    cursor: userAnswer.trim() ? "pointer" : "default",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {t.check}
+                </button>
+              </div>
+            ) : answerMode !== "write" ? (
+              <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 32, letterSpacing: 0.5 }}>
+                {t.tapToReveal}
+              </div>
+            ) : null}
           </>
         ) : (
           <>
@@ -1719,6 +1902,47 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
           </>
         )}
       </div>
+      {!editing && answerMode === "write" && (
+        <div style={{ marginTop: 16, width: "100%", maxWidth: mobile ? "100%" : 500, marginLeft: "auto", marginRight: "auto" }}>
+          {flipped && (
+            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2, marginBottom: 6 }}>
+              {t.yourAnswer}
+            </div>
+          )}
+          <DrawingCanvas ref={drawRef} height={mobile ? 160 : 200} />
+          {!flipped && (
+            <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 12, letterSpacing: 0.5, textAlign: "center" }}>
+              {t.writeHint}
+            </div>
+          )}
+        </div>
+      )}
+      {flipped && !editing && score !== null && (
+        <div style={{
+          marginTop: 16, padding: "14px 18px",
+          background: T.bgInput, borderRadius: T.radiusSm,
+          width: "100%", maxWidth: mobile ? "100%" : 500,
+          marginLeft: "auto", marginRight: "auto", boxSizing: "border-box",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontFamily: font.mono, fontSize: 12, color: T.textTertiary }}>
+              {t.yourAnswer}
+            </span>
+            <span style={{
+              fontFamily: font.mono, fontSize: 16, fontWeight: 700,
+              color: score >= 90 ? T.success : score >= 70 ? T.warning : T.danger,
+            }}>
+              {score}%
+            </span>
+          </div>
+          <div style={{
+            fontFamily: font.body, fontSize: 18, color: T.text, marginTop: 8,
+            opacity: score < 70 ? 0.6 : 1,
+          }}>
+            {userAnswer}
+          </div>
+        </div>
+      )}
       {flipped && !editing && (
         <div style={{ display: "flex", flexWrap: mobile ? "wrap" : "nowrap", gap: 8, marginTop: 16 }}>
           {qualityButtons.map((btn) => (
@@ -2836,6 +3060,7 @@ export default function VocabApp() {
   });
   const [activityRange, setActivityRange] = useState("month");
   const [studyDirection, setStudyDirection] = useState("en-pt");
+  const [answerMode, setAnswerMode] = useState("passive");
   const [settings, setSettings] = useState({
     theme: "light",
     dailyGoal: 20,
@@ -3305,7 +3530,39 @@ export default function VocabApp() {
                     ))}
                   </div>
                 </div>
-                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} totalDue={dueCards.length} studyDirection={studyDirection} />
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                  <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
+                    {[
+                      { id: "passive", label: t.modePassive },
+                      { id: "type", label: t.modeType },
+                      { id: "write", label: t.modeWrite },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        onClick={() => setAnswerMode(opt.id)}
+                        style={{
+                          padding: "6px 16px",
+                          background: answerMode === opt.id ? T.bgCard : "transparent",
+                          border: "none",
+                          borderRadius: 9999,
+                          fontFamily: font.mono,
+                          fontSize: 12,
+                          fontWeight: answerMode === opt.id ? 600 : 400,
+                          color: answerMode === opt.id ? T.text : T.textTertiary,
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                          boxShadow: answerMode === opt.id ? T.shadow : "none",
+                          letterSpacing: 0.5,
+                        }}
+                        onMouseEnter={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
+                        onMouseLeave={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = "transparent"; }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} />
                 {(dueReview > 0 || dueNew > 0) && (
                   <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
                     <span style={{
