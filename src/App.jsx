@@ -1824,11 +1824,12 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
             )}
             {answerMode === "type" ? (
               <div style={{ marginTop: 24, width: "100%", maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-                <input
-                  type="text"
+                <textarea
+                  rows={1}
                   value={userAnswer}
                   onChange={(e) => setUserAnswer(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && userAnswer.trim()) handleCheck(e); }}
+                  onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && userAnswer.trim()) { e.preventDefault(); handleCheck(e); } }}
                   placeholder={studyDirection === "en-pt" ? t.typeAnswerPt : t.typeAnswerEn}
                   autoFocus
                   style={{
@@ -1837,6 +1838,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
                     borderRadius: T.radiusSm, color: T.text,
                     fontFamily: font.body, fontSize: 16, outline: "none",
                     transition: "border-color 0.2s",
+                    resize: "none", overflow: "hidden",
                   }}
                   onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
                   onBlur={(e) => { e.target.style.borderColor = T.border; }}
