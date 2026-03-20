@@ -3499,7 +3499,7 @@ export default function VocabApp() {
               </div>
             ) : (
               <>
-                <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
                   <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
                     {[
                       { id: "en-pt", label: t.enToPt },
@@ -3529,8 +3529,6 @@ export default function VocabApp() {
                       </button>
                     ))}
                   </div>
-                </div>
-                <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
                   <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
                     {[
                       { id: "passive", label: t.modePassive },
