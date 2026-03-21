@@ -1651,6 +1651,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
   const [editEn, setEditEn] = useState("");
   const [userAnswer, setUserAnswer] = useState("");
   const [score, setScore] = useState(null);
+  const [hasRevealed, setHasRevealed] = useState(false);
   const drawRef = useRef(null);
   const ptRef = useRef(null);
   const enRef = useRef(null);
@@ -1723,14 +1724,14 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
   return (
     <div style={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(-16px)" : "translateY(0)", transition: "all 0.28s ease" }}>
       <div
-        onClick={() => { if (!flipped && !editing && answerMode !== "type") { setFlipped(true); } }}
+        onClick={() => { if (editing) return; if (answerMode === "type" && !hasRevealed) return; if (!flipped) { setFlipped(true); setHasRevealed(true); } else { setFlipped(false); } }}
         style={{
           position: "relative",
           background: T.bgCard,
           border: `1px solid ${T.border}`,
           borderRadius: T.radius,
           padding: mobile ? "36px 20px" : "56px 40px",
-          cursor: editing ? "default" : flipped ? "default" : answerMode === "type" ? "default" : "pointer",
+          cursor: editing ? "default" : (answerMode === "type" && !hasRevealed) ? "default" : "pointer",
           minHeight: mobile ? 180 : 240,
           display: "flex",
           flexDirection: "column",
@@ -1740,7 +1741,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
           boxShadow: T.shadowLg,
           transition: "all 0.3s",
         }}
-        onMouseEnter={(e) => { if (!flipped && !editing) e.currentTarget.style.borderColor = T.borderStrong; }}
+        onMouseEnter={(e) => { if (!editing) e.currentTarget.style.borderColor = T.borderStrong; }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
       >
         {!editing && onUpdate && (
@@ -1936,20 +1937,20 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
       </div>
       {!editing && answerMode === "write" && (
         <div style={{ marginTop: 16, width: "100%", maxWidth: mobile ? "100%" : 500, marginLeft: "auto", marginRight: "auto" }}>
-          {flipped && (
+          {hasRevealed && (
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2, marginBottom: 6 }}>
               {t.yourAnswer}
             </div>
           )}
           <DrawingCanvas ref={drawRef} height={mobile ? 160 : 200} />
-          {!flipped && (
+          {!hasRevealed && (
             <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 12, letterSpacing: 0.5, textAlign: "center" }}>
               {t.writeHint}
             </div>
           )}
         </div>
       )}
-      {flipped && !editing && score !== null && (
+      {hasRevealed && !editing && score !== null && (
         <div style={{
           marginTop: 16, padding: "14px 18px",
           background: T.bgInput, borderRadius: T.radiusSm,
@@ -1975,7 +1976,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
           </div>
         </div>
       )}
-      {flipped && !editing && (
+      {hasRevealed && !editing && (
         <div style={{ display: "flex", flexWrap: mobile ? "wrap" : "nowrap", gap: 8, marginTop: 16 }}>
           {qualityButtons.map((btn) => (
             <button
