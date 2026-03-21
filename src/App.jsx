@@ -133,6 +133,32 @@ const FSRS = {
     };
   },
 };
+// ─── FSRS Preview Intervals ───
+const previewIntervals = (card) => {
+  const grades = [1, 2, 3, 4];
+  return grades.map((grade) => {
+    let { stability: s, difficulty: d, reps } = card;
+    if (reps === 0) {
+      s = FSRS.s0(grade);
+    } else {
+      const lastReviewDate = card.lastReview
+        ? new Date(card.lastReview + "T12:00:00")
+        : new Date();
+      const elapsed = Math.max(0, (new Date() - lastReviewDate) / 86400000);
+      const r = FSRS.retrievability(elapsed, s);
+      s = FSRS.stability(d, s, r, grade);
+    }
+    return FSRS.interval(s);
+  });
+};
+const formatFutureDate = (days) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  const dateStr = `${d.getDate()}/${d.getMonth() + 1}`;
+  if (days < 1) return "hoje";
+  if (days === 1) return "amanha";
+  return `${days}d \u00b7 ${dateStr}`;
+};
 // ─── Text Similarity (Levenshtein) ───
 const textSimilarity = (a, b) => {
   const norm = (s) => s.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1679,12 +1705,13 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
     setExiting(true);
     setTimeout(() => { onReview(card.id, quality); setFlipped(false); setExiting(false); }, 280);
   };
+  const intervals = previewIntervals(card);
   const qualityButtons = [
     { q: 0, label: t.skip, emoji: "⏭️", color: T.textTertiary },
-    { q: 1, label: t.forgot, emoji: "❌", color: T.danger },
-    { q: 2, label: t.partiallyRecalled, emoji: "😬", color: T.warning },
-    { q: 3, label: t.recalledWithEffort, emoji: "😄", color: T.success },
-    { q: 4, label: t.easilyRecalled, emoji: "👑", color: T.textSecondary },
+    { q: 1, label: t.forgot, emoji: "❌", color: T.danger, days: intervals[0] },
+    { q: 2, label: t.partiallyRecalled, emoji: "😬", color: T.warning, days: intervals[1] },
+    { q: 3, label: t.recalledWithEffort, emoji: "😄", color: T.success, days: intervals[2] },
+    { q: 4, label: t.easilyRecalled, emoji: "👑", color: T.textSecondary, days: intervals[3] },
   ];
   return (
     <div style={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(-16px)" : "translateY(0)", transition: "all 0.28s ease" }}>
@@ -1968,6 +1995,11 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
               <span style={{ fontFamily: font.body, fontSize: 11, fontWeight: 500, color: T.textSecondary, lineHeight: 1.2, textAlign: "center" }}>
                 {btn.label}
               </span>
+              {btn.days != null && (
+                <span style={{ fontFamily: font.mono, fontSize: 9, color: T.textTertiary, lineHeight: 1.2, textAlign: "center" }}>
+                  {formatFutureDate(btn.days)}
+                </span>
+              )}
             </button>
           ))}
         </div>
