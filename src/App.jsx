@@ -1660,6 +1660,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
     const s = computeScore(userAnswer, card, studyDirection);
     setScore(s);
     setFlipped(true);
+    setHasRevealed(true);
   };
   const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const startEdit = (e) => {
@@ -1817,122 +1818,123 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
               </button>
             </div>
           </div>
-        ) : !flipped ? (
-          <>
-            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
-              {studyDirection === "en-pt" ? t.english : t.portuguese}
-            </div>
-            {studyDirection === "en-pt" ? (
-              <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                {card.translation}
-              </div>
-            ) : (
-              <>
-                {card.phrase ? (
-                  <div style={{ maxWidth: mobile ? "100%" : 760 }}>
-                    <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
-                  </div>
-                ) : (
-                  <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                    {card.word}
-                  </div>
-                )}
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
-                  style={{
-                    marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
-                    borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
-                    fontFamily: font.body, fontSize: 13, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
-                >
-                  {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
-                  {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
-                </button>
-              </>
-            )}
-            {answerMode === "type" ? (
-              <div style={{ marginTop: 24, width: "100%", maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-                <textarea
-                  rows={1}
-                  value={userAnswer}
-                  onChange={(e) => setUserAnswer(e.target.value)}
-                  onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && userAnswer.trim()) { e.preventDefault(); handleCheck(e); } }}
-                  placeholder={studyDirection === "en-pt" ? t.typeAnswerPt : t.typeAnswerEn}
-                  autoFocus
-                  style={{
-                    width: "100%", padding: "12px 16px", boxSizing: "border-box",
-                    background: T.bgInput, border: `1px solid ${T.border}`,
-                    borderRadius: T.radiusSm, color: T.text,
-                    fontFamily: font.body, fontSize: 16, outline: "none",
-                    transition: "border-color 0.2s",
-                    resize: "none", overflow: "hidden",
-                  }}
-                  onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
-                  onBlur={(e) => { e.target.style.borderColor = T.border; }}
-                />
-                <button
-                  onClick={handleCheck}
-                  disabled={!userAnswer.trim()}
-                  style={{
-                    marginTop: 10, padding: "10px 28px",
-                    background: userAnswer.trim() ? T.accent : T.bgInput,
-                    border: "none", borderRadius: T.radiusSm,
-                    color: userAnswer.trim() ? "#fff" : T.textPlaceholder,
-                    fontFamily: font.body, fontSize: 14, fontWeight: 600,
-                    cursor: userAnswer.trim() ? "pointer" : "default",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {t.check}
-                </button>
-              </div>
-            ) : answerMode !== "write" ? (
-              <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 32, letterSpacing: 0.5 }}>
-                {t.tapToReveal}
-              </div>
-            ) : null}
-          </>
         ) : (
-          <>
-            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.keyword, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
-              {studyDirection === "en-pt" ? t.portuguese : t.english}
-            </div>
-            {studyDirection === "en-pt" ? (
-              <>
-                {card.phrase ? (
-                  <div style={{ maxWidth: mobile ? "100%" : 760 }}>
-                    <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
-                  </div>
-                ) : (
-                  <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                    {card.word}
-                  </div>
-                )}
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
-                  style={{
-                    marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
-                    borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
-                    fontFamily: font.body, fontSize: 13, cursor: "pointer",
-                    display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
-                >
-                  {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
-                  {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
-                </button>
-              </>
-            ) : (
-              <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                {card.translation}
+          <div style={{ display: "grid", width: "100%" }}>
+            <div style={{ gridArea: "1/1", visibility: flipped ? "hidden" : "visible", pointerEvents: flipped ? "none" : "auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
+                {studyDirection === "en-pt" ? t.english : t.portuguese}
               </div>
-            )}
-          </>
+              {studyDirection === "en-pt" ? (
+                <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
+                  {card.translation}
+                </div>
+              ) : (
+                <>
+                  {card.phrase ? (
+                    <div style={{ maxWidth: mobile ? "100%" : 760 }}>
+                      <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
+                    </div>
+                  ) : (
+                    <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
+                      {card.word}
+                    </div>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
+                    style={{
+                      marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
+                      borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
+                      fontFamily: font.body, fontSize: 13, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
+                  >
+                    {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
+                    {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
+                  </button>
+                </>
+              )}
+              {answerMode === "type" && !hasRevealed ? (
+                <div style={{ marginTop: 24, width: "100%", maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+                  <textarea
+                    rows={1}
+                    value={userAnswer}
+                    onChange={(e) => setUserAnswer(e.target.value)}
+                    onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && userAnswer.trim()) { e.preventDefault(); handleCheck(e); } }}
+                    placeholder={studyDirection === "en-pt" ? t.typeAnswerPt : t.typeAnswerEn}
+                    autoFocus
+                    style={{
+                      width: "100%", padding: "12px 16px", boxSizing: "border-box",
+                      background: T.bgInput, border: `1px solid ${T.border}`,
+                      borderRadius: T.radiusSm, color: T.text,
+                      fontFamily: font.body, fontSize: 16, outline: "none",
+                      transition: "border-color 0.2s",
+                      resize: "none", overflow: "hidden",
+                    }}
+                    onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
+                    onBlur={(e) => { e.target.style.borderColor = T.border; }}
+                  />
+                  <button
+                    onClick={handleCheck}
+                    disabled={!userAnswer.trim()}
+                    style={{
+                      marginTop: 10, padding: "10px 28px",
+                      background: userAnswer.trim() ? T.accent : T.bgInput,
+                      border: "none", borderRadius: T.radiusSm,
+                      color: userAnswer.trim() ? "#fff" : T.textPlaceholder,
+                      fontFamily: font.body, fontSize: 14, fontWeight: 600,
+                      cursor: userAnswer.trim() ? "pointer" : "default",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {t.check}
+                  </button>
+                </div>
+              ) : answerMode !== "write" && !hasRevealed ? (
+                <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 32, letterSpacing: 0.5 }}>
+                  {t.tapToReveal}
+                </div>
+              ) : null}
+            </div>
+            <div style={{ gridArea: "1/1", visibility: flipped ? "visible" : "hidden", pointerEvents: flipped ? "auto" : "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ fontFamily: font.mono, fontSize: 10, color: T.keyword, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
+                {studyDirection === "en-pt" ? t.portuguese : t.english}
+              </div>
+              {studyDirection === "en-pt" ? (
+                <>
+                  {card.phrase ? (
+                    <div style={{ maxWidth: mobile ? "100%" : 760 }}>
+                      <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
+                    </div>
+                  ) : (
+                    <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
+                      {card.word}
+                    </div>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
+                    style={{
+                      marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
+                      borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
+                      fontFamily: font.body, fontSize: 13, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
+                  >
+                    {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
+                    {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
+                  </button>
+                </>
+              ) : (
+                <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
+                  {card.translation}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
       {!editing && answerMode === "write" && (
