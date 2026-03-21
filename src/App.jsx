@@ -1938,7 +1938,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
         )}
       </div>
       {!editing && answerMode === "write" && (
-        <div style={{ marginTop: 16, width: "100%", maxWidth: mobile ? "100%" : 500, marginLeft: "auto", marginRight: "auto" }}>
+        <div style={{ marginTop: 16, width: "100%" }}>
           {hasRevealed && (
             <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2, marginBottom: 6 }}>
               {t.yourAnswer}
