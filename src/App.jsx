@@ -122,12 +122,15 @@ const FSRS = {
     const interval = FSRS.interval(s);
     const due = new Date();
     due.setDate(due.getDate() + interval);
+    // Forgot cards reappear after 10 minutes instead of tomorrow
+    const dueAfter = grade === 1 ? Date.now() + 10 * 60 * 1000 : null;
     return {
       ...card,
       stability: s,
       difficulty: d,
       reps: reps + 1,
-      dueDate: localDateStr(due),
+      dueDate: grade === 1 ? localDateStr() : localDateStr(due),
+      dueAfter,
       lastReview: localDateStr(),
       modifiedAt: Date.now(),
     };
@@ -137,6 +140,7 @@ const FSRS = {
 const previewIntervals = (card) => {
   const grades = [1, 2, 3, 4];
   return grades.map((grade) => {
+    if (grade === 1) return 0; // forgot = 10 min delay, not days
     let { stability: s, difficulty: d, reps } = card;
     if (reps === 0) {
       s = FSRS.s0(grade);
@@ -152,10 +156,10 @@ const previewIntervals = (card) => {
   });
 };
 const formatFutureDate = (days) => {
+  if (days === 0) return "10min";
   const d = new Date();
   d.setDate(d.getDate() + days);
   const dateStr = `${d.getDate()}/${d.getMonth() + 1}`;
-  if (days < 1) return "hoje";
   if (days === 1) return "amanha";
   return `${days}d \u00b7 ${dateStr}`;
 };
@@ -3331,13 +3335,16 @@ export default function VocabApp() {
   };
   const [skippedIds, setSkippedIds] = useState(new Set());
   const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };
+  // Tick every 30s so forgot-cards (10min delay) reappear automatically
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const id = setInterval(() => setTick((t) => t + 1), 30000); return () => clearInterval(id); }, []);
   const dueCards = useMemo(() => {
-    let due = cards.filter((c) => c.dueDate <= today() && !skippedIds.has(c.id));
+    let due = cards.filter((c) => c.dueDate <= today() && !skippedIds.has(c.id) && (!c.dueAfter || Date.now() >= c.dueAfter));
     if (settings.cardOrder === "newest") {
       return due.sort((a, b) => b.id.localeCompare(a.id));
     }
     return due.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  }, [cards, skippedIds, settings.cardOrder]);
+  }, [cards, skippedIds, settings.cardOrder, tick]);
   const sortedCards = useMemo(() => {
     const so = { new: 0, learning: 1, young: 2, mature: 3, mastered: 4 };
     return [...cards].sort((a, b) => {
