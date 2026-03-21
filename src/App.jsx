@@ -1231,6 +1231,9 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
   const currentStreak = (() => {
     let streak = 0;
     let d = new Date();
+    if (!practiceDays[localDateStr(d)] || practiceDays[localDateStr(d)] === 0) {
+      d.setDate(d.getDate() - 1);
+    }
     while (true) {
       const ds = localDateStr(d);
       if (practiceDays[ds] && practiceDays[ds] > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
@@ -3799,6 +3802,9 @@ export default function VocabApp() {
                 { label: t.dayStreak, value: (() => {
                   let streak = 0;
                   let d = new Date();
+                  if (!practiceDays[localDateStr(d)] || practiceDays[localDateStr(d)] === 0) {
+                    d.setDate(d.getDate() - 1);
+                  }
                   while (true) {
                     const ds = localDateStr(d);
                     if (practiceDays[ds] && practiceDays[ds] > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
