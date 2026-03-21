@@ -825,10 +825,9 @@ const themes = {
     radiusSm: 12,
     radiusPill: 9999,
     heatEmpty: "#E8E8E8",
-    heat1: "#CCCCCC",
-    heat2: "#8FB59A",
-    heat3: "#5A9E6F",
-    heat4: "#2D6A4F",
+    heat1: "#B7DFBA",
+    heat2: "#5A9E6F",
+    heat3: "#2D6A4F",
   },
   dark: {
     bg: "#0E0E0E",
@@ -856,10 +855,9 @@ const themes = {
     radiusSm: 12,
     radiusPill: 9999,
     heatEmpty: "rgba(255,255,255,0.06)",
-    heat1: "#1A3A2A",
-    heat2: "#2D6A4F",
-    heat3: "#40916C",
-    heat4: "#6FCF97",
+    heat1: "#2D6A4F",
+    heat2: "#40916C",
+    heat3: "#6FCF97",
   },
 };
 let T = themes.light;
@@ -1186,11 +1184,9 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
     if (!day) return "transparent";
     const count = practiceDays[day] || 0;
     if (count === 0) return T.heatEmpty;
-    const intensity = Math.min(count / Math.max(maxCount, 4), 1);
-    if (intensity <= 0.25) return T.heat1;
-    if (intensity <= 0.5) return T.heat2;
-    if (intensity <= 0.75) return T.heat3;
-    return T.heat4;
+    if (count < 10) return T.heat1;
+    if (count <= 30) return T.heat2;
+    return T.heat3;
   };
   const monthPositions = [];
   let lastMonth = -1;
@@ -1320,7 +1316,7 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3, marginTop: 10 }}>
         <span style={{ fontFamily: font.mono, fontSize: 9, color: T.textTertiary, marginRight: 2 }}>{t.less}</span>
-        {[T.heatEmpty, T.heat1, T.heat2, T.heat3, T.heat4].map((c, i) => (
+        {[T.heatEmpty, T.heat1, T.heat2, T.heat3].map((c, i) => (
           <div key={i} style={{ width: 10, height: 10, borderRadius: 2, background: c }} />
         ))}
         <span style={{ fontFamily: font.mono, fontSize: 9, color: T.textTertiary, marginLeft: 2 }}>{t.more}</span>
