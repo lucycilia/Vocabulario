@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -1655,6 +1655,14 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
   const drawRef = useRef(null);
   const ptRef = useRef(null);
   const enRef = useRef(null);
+  const frontRef = useRef(null);
+  const backRef = useRef(null);
+  const [contentHeight, setContentHeight] = useState(0);
+  useLayoutEffect(() => {
+    const fh = frontRef.current?.offsetHeight || 0;
+    const bh = backRef.current?.offsetHeight || 0;
+    setContentHeight(Math.max(fh, bh));
+  }, [card.id, studyDirection, hasRevealed, answerMode]);
   const handleCheck = (e) => {
     if (e) e.stopPropagation();
     const s = computeScore(userAnswer, card, studyDirection);
@@ -1819,8 +1827,8 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
             </div>
           </div>
         ) : (
-          <div style={{ display: "grid", width: "100%" }}>
-            <div style={{ gridArea: "1/1", visibility: flipped ? "hidden" : "visible", pointerEvents: flipped ? "none" : "auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ position: "relative", width: "100%", minHeight: contentHeight }}>
+            <div ref={frontRef} style={{ position: "absolute", top: 0, left: 0, right: 0, visibility: flipped ? "hidden" : "visible", pointerEvents: flipped ? "none" : "auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
               <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
                 {studyDirection === "en-pt" ? t.english : t.portuguese}
               </div>
@@ -1898,7 +1906,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
                 </div>
               ) : null}
             </div>
-            <div style={{ gridArea: "1/1", visibility: flipped ? "visible" : "hidden", pointerEvents: flipped ? "auto" : "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div ref={backRef} style={{ position: "absolute", top: 0, left: 0, right: 0, visibility: flipped ? "visible" : "hidden", pointerEvents: flipped ? "auto" : "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
               <div style={{ fontFamily: font.mono, fontSize: 10, color: T.keyword, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
                 {studyDirection === "en-pt" ? t.portuguese : t.english}
               </div>
