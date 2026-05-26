@@ -1439,7 +1439,14 @@ function PencilIcon({ size = 18, color = T.textTertiary }) {
 function SuspendIcon({ size = 18, color = T.textTertiary }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+      <line x1="12" y1="2" x2="12" y2="22" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <line x1="20" y1="4" x2="4" y2="20" />
+      <line x1="4" y1="4" x2="20" y2="20" />
+      <path d="m9 5 3 3 3-3" />
+      <path d="m9 19 3-3 3 3" />
+      <path d="m5 9 3 3-3 3" />
+      <path d="m19 9-3 3 3 3" />
     </svg>
   );
 }
