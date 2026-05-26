@@ -807,6 +807,92 @@ const applyRemnoteDueDates = (cards) => {
 // ─── Date Helpers ───
 const localDateStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const today = () => localDateStr();
+// ─── Study Timer Helpers ───
+const IDLE_CAP_MS = 2 * 60 * 60 * 1000; // 2-hour auto-stop after gap
+const HEARTBEAT_MS = 30 * 1000;
+const formatDuration = (totalSec, opts = {}) => {
+  const s = Math.max(0, Math.round(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (opts.short) {
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m`;
+    return `${sec}s`;
+  }
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+};
+const isoWeek = (d) => {
+  const t = new Date(d);
+  t.setHours(0, 0, 0, 0);
+  // Thursday in current week decides the year
+  t.setDate(t.getDate() + 3 - ((t.getDay() + 6) % 7));
+  const week1 = new Date(t.getFullYear(), 0, 4);
+  return {
+    year: t.getFullYear(),
+    week: 1 + Math.round(((t - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7),
+  };
+};
+const weekStartStr = (d) => {
+  const t = new Date(d);
+  t.setHours(0, 0, 0, 0);
+  const dow = (t.getDay() + 6) % 7; // 0 = Monday
+  t.setDate(t.getDate() - dow);
+  return localDateStr(t);
+};
+const aggregateStudyTime = (studyTime, period, range) => {
+  // returns [{ key, label, seconds, startDate }, ...] ordered chronologically
+  const now = new Date();
+  const buckets = new Map();
+  if (period === "day") {
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = localDateStr(d);
+      buckets.set(key, { key, label: `${d.getMonth() + 1}/${d.getDate()}`, seconds: 0, startDate: key });
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      if (buckets.has(date)) buckets.get(date).seconds += sec;
+    });
+  } else if (period === "week") {
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 7);
+      const key = weekStartStr(d);
+      if (!buckets.has(key)) {
+        const ws = new Date(key + "T12:00:00");
+        buckets.set(key, { key, label: `${ws.getMonth() + 1}/${ws.getDate()}`, seconds: 0, startDate: key });
+      }
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      const wk = weekStartStr(new Date(date + "T12:00:00"));
+      if (buckets.has(wk)) buckets.get(wk).seconds += sec;
+    });
+  } else if (period === "month") {
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      buckets.set(key, { key, label: monthNames[d.getMonth()], seconds: 0, startDate: key + "-01" });
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      const k = date.slice(0, 7);
+      if (buckets.has(k)) buckets.get(k).seconds += sec;
+    });
+  } else if (period === "year") {
+    for (let i = range - 1; i >= 0; i--) {
+      const y = now.getFullYear() - i;
+      const key = String(y);
+      buckets.set(key, { key, label: key, seconds: 0, startDate: key + "-01-01" });
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      const k = date.slice(0, 4);
+      if (buckets.has(k)) buckets.get(k).seconds += sec;
+    });
+  }
+  return Array.from(buckets.values());
+};
 const normalizeDate = (v) => {
   if (!v) return "";
   const s = String(v);
@@ -920,6 +1006,18 @@ const i18n = {
     writeHint: "escreva sua resposta, depois toque para revelar",
     listenPronunciation: "ouvir pronúncia",
     stopPronunciation: "parar",
+    startTimer: "iniciar tempo",
+    stopTimer: "parar tempo",
+    timerRunning: "estudando",
+    timerAutoStopped: "tempo parado — você esteve ausente",
+    totalTime: "tempo total",
+    studyTimeReport: "tempo de estudo",
+    periodDay: "dia",
+    periodWeek: "semana",
+    periodMonth: "mês",
+    periodYear: "ano",
+    exportStudyTime: "exportar tempo",
+    exportStudyTimeDesc: "Baixe seu tempo de estudo como CSV (uma linha por dia).",
     skip: "Pular",
     forgot: "Esqueci",
     partiallyRecalled: "Parcialmente",
@@ -1067,6 +1165,18 @@ const i18n = {
     writeHint: "write your answer, then tap to reveal",
     listenPronunciation: "listen to pronunciation",
     stopPronunciation: "stop",
+    startTimer: "start timer",
+    stopTimer: "stop timer",
+    timerRunning: "studying",
+    timerAutoStopped: "timer auto-stopped — you were away",
+    totalTime: "total time",
+    studyTimeReport: "study time",
+    periodDay: "day",
+    periodWeek: "week",
+    periodMonth: "month",
+    periodYear: "year",
+    exportStudyTime: "export time",
+    exportStudyTimeDesc: "Download your study time as CSV (one row per day).",
     skip: "Skip",
     forgot: "Forgot",
     partiallyRecalled: "Partially recalled",
@@ -3089,9 +3199,14 @@ export default function VocabApp() {
   const mobile = useIsMobile();
   const [cards, setCards] = useState([]);
   const [practiceDays, setPracticeDays] = useState({});
+  const [studyTime, setStudyTime] = useState({}); // { "YYYY-MM-DD": seconds }
+  const [activeSession, setActiveSession] = useState(null); // { startedAt, lastSeenAt, accumulatedSec } | null
+  const [liveElapsed, setLiveElapsed] = useState(0);
+  const [timerToast, setTimerToast] = useState(null); // { message }
   const [view, setView] = useState("practice");
   const [loaded, setLoaded] = useState(false);
   const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
+  const [studyTimePeriod, setStudyTimePeriod] = useState("week");
   const [showAddInline, setShowAddInline] = useState(false);
   const [showImportInline, setShowImportInline] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -3190,9 +3305,13 @@ export default function VocabApp() {
       let localCards = [];
       let localDays = {};
       let localDeleted = {};
+      let localStudyTime = {};
+      let localActiveSession = null;
       try { const r = await window.storage.get("vocab-cards"); if (r) localCards = JSON.parse(r.value); } catch {}
       try { const r = await window.storage.get("vocab-practice-days"); if (r) localDays = JSON.parse(r.value); } catch {}
       try { const r = await window.storage.get("vocab-deleted"); if (r) localDeleted = JSON.parse(r.value); } catch {}
+      try { const r = await window.storage.get("vocab-study-time"); if (r) localStudyTime = JSON.parse(r.value); } catch {}
+      try { const r = await window.storage.get("vocab-active-session"); if (r) localActiveSession = JSON.parse(r.value); } catch {}
       // One-time RemNote due date + last practiced migration
       let didRemnoteMigration = false;
       let remnotePracticeDays = {};
@@ -3216,6 +3335,35 @@ export default function VocabApp() {
       setCards(localCards);
       setPracticeDays(localDays);
       setDeletedCards(localDeleted);
+      setStudyTime(localStudyTime);
+      // Recover active session (if any)
+      if (localActiveSession && localActiveSession.startedAt && localActiveSession.lastSeenAt) {
+        const now = Date.now();
+        const gap = now - localActiveSession.lastSeenAt;
+        if (gap < IDLE_CAP_MS) {
+          // Continue running — count the gap as study time
+          setActiveSession({
+            startedAt: localActiveSession.startedAt,
+            lastSeenAt: now,
+            accumulatedSec: (localActiveSession.accumulatedSec || 0) + Math.floor(gap / 1000),
+          });
+        } else {
+          // Gap too long — flush what we had and stop
+          const dateKey = localDateStr(new Date(localActiveSession.lastSeenAt));
+          const accumulated = Math.floor(localActiveSession.accumulatedSec || 0);
+          if (accumulated > 0) {
+            const nextStudyTime = { ...localStudyTime, [dateKey]: (localStudyTime[dateKey] || 0) + accumulated };
+            setStudyTime(nextStudyTime);
+            window.storage.set("vocab-study-time", JSON.stringify(nextStudyTime)).catch(() => {});
+          }
+          window.storage.set("vocab-active-session", JSON.stringify(null)).catch(() => {});
+          const gapHours = Math.floor(gap / 3600000);
+          const gapMins = Math.floor((gap % 3600000) / 60000);
+          const awayLabel = gapHours > 0 ? `${gapHours}h ${gapMins}m` : `${gapMins}m`;
+          setTimerToast({ message: `Timer auto-stopped — you were away ${awayLabel}` });
+          setTimeout(() => setTimerToast(null), 6000);
+        }
+      }
       setLoaded(true);
 
       // Background sync with Google Sheets
@@ -3317,6 +3465,65 @@ export default function VocabApp() {
       scheduleSyncIfDirty();
     }
   }, [settings, scheduleSyncIfDirty]);
+  const studyTimeRef = useRef(studyTime);
+  const activeSessionRef = useRef(activeSession);
+  useEffect(() => { studyTimeRef.current = studyTime; }, [studyTime]);
+  useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
+  const persistStudyTime = useCallback((next) => {
+    window.storage.set("vocab-study-time", JSON.stringify(next)).catch(() => {});
+  }, []);
+  const persistActiveSession = useCallback((next) => {
+    window.storage.set("vocab-active-session", JSON.stringify(next)).catch(() => {});
+  }, []);
+  const startTimer = useCallback(() => {
+    const now = Date.now();
+    const session = { startedAt: now, lastSeenAt: now, accumulatedSec: 0 };
+    setActiveSession(session);
+    persistActiveSession(session);
+  }, [persistActiveSession]);
+  const stopTimer = useCallback(() => {
+    const s = activeSessionRef.current;
+    if (!s) return;
+    const now = Date.now();
+    const finalSec = (s.accumulatedSec || 0) + Math.max(0, Math.floor((now - s.lastSeenAt) / 1000));
+    if (finalSec > 0) {
+      const dateKey = localDateStr(new Date(s.lastSeenAt));
+      const next = { ...studyTimeRef.current, [dateKey]: (studyTimeRef.current[dateKey] || 0) + finalSec };
+      setStudyTime(next);
+      persistStudyTime(next);
+    }
+    setActiveSession(null);
+    persistActiveSession(null);
+    setLiveElapsed(0);
+  }, [persistStudyTime, persistActiveSession]);
+  const heartbeat = useCallback(() => {
+    const s = activeSessionRef.current;
+    if (!s) return;
+    const now = Date.now();
+    const gap = now - s.lastSeenAt;
+    if (gap >= IDLE_CAP_MS) {
+      // Idle cap exceeded — auto-stop at lastSeenAt, preserve elapsed up to then
+      const dateKey = localDateStr(new Date(s.lastSeenAt));
+      const accumulated = Math.floor(s.accumulatedSec || 0);
+      if (accumulated > 0) {
+        const next = { ...studyTimeRef.current, [dateKey]: (studyTimeRef.current[dateKey] || 0) + accumulated };
+        setStudyTime(next);
+        persistStudyTime(next);
+      }
+      setActiveSession(null);
+      persistActiveSession(null);
+      setLiveElapsed(0);
+      const gapHours = Math.floor(gap / 3600000);
+      const gapMins = Math.floor((gap % 3600000) / 60000);
+      const awayLabel = gapHours > 0 ? `${gapHours}h ${gapMins}m` : `${gapMins}m`;
+      setTimerToast({ message: `Timer auto-stopped — you were away ${awayLabel}` });
+      setTimeout(() => setTimerToast(null), 6000);
+      return;
+    }
+    const updated = { ...s, lastSeenAt: now, accumulatedSec: (s.accumulatedSec || 0) + Math.floor(gap / 1000) };
+    setActiveSession(updated);
+    persistActiveSession(updated);
+  }, [persistStudyTime, persistActiveSession]);
   const saveSettings = useCallback(async (newSettings) => {
     setSettings(newSettings);
     try { await window.storage.set("vocab-settings", JSON.stringify(newSettings)); } catch (e) { console.error("Settings save failed:", e); }
@@ -3352,6 +3559,45 @@ export default function VocabApp() {
   // Tick every 30s so forgot-cards (10min delay) reappear automatically
   const [tick, setTick] = useState(0);
   useEffect(() => { const id = setInterval(() => setTick((t) => t + 1), 30000); return () => clearInterval(id); }, []);
+  // Timer: 30s heartbeat while a session is active
+  useEffect(() => {
+    if (!activeSession) return;
+    const id = setInterval(heartbeat, HEARTBEAT_MS);
+    return () => clearInterval(id);
+  }, [activeSession, heartbeat]);
+  // Timer: 1s live counter for the ticking UI
+  useEffect(() => {
+    if (!activeSession) { setLiveElapsed(0); return; }
+    const update = () => {
+      const s = activeSessionRef.current;
+      if (!s) return;
+      setLiveElapsed((s.accumulatedSec || 0) + Math.max(0, Math.floor((Date.now() - s.lastSeenAt) / 1000)));
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [activeSession]);
+  // Timer: persist on visibility change and unload
+  useEffect(() => {
+    const onHide = () => {
+      const s = activeSessionRef.current;
+      if (!s) return;
+      const now = Date.now();
+      const updated = { ...s, lastSeenAt: now, accumulatedSec: (s.accumulatedSec || 0) + Math.max(0, Math.floor((now - s.lastSeenAt) / 1000)) };
+      activeSessionRef.current = updated;
+      persistActiveSession(updated);
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") onHide();
+      else heartbeat();
+    };
+    window.addEventListener("beforeunload", onHide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("beforeunload", onHide);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [heartbeat, persistActiveSession]);
   const dueCards = useMemo(() => {
     let due = cards.filter((c) => c.dueDate <= today() && !skippedIds.has(c.id) && (!c.dueAfter || Date.now() >= c.dueAfter));
     if (settings.cardOrder === "newest") {
@@ -3408,6 +3654,7 @@ export default function VocabApp() {
         button:active { transform: scale(0.98); }
         [contenteditable] b, [contenteditable] strong { color: ${T.keyword}; font-weight: 700; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes timerPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
         .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
@@ -3417,6 +3664,34 @@ export default function VocabApp() {
             vocabulário
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {activeSession && (
+            <button
+              onClick={() => setView("practice")}
+              title={t.timerRunning}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "0 10px", height: 34, borderRadius: 9999,
+                background: T.dangerBg,
+                border: `1px solid rgba(196,72,62,0.2)`,
+                cursor: "pointer", transition: "all 0.2s",
+                fontFamily: font.mono,
+                fontSize: mobile ? 10 : 11,
+                color: T.danger,
+                fontVariantNumeric: "tabular-nums",
+                letterSpacing: 0.3,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+            >
+              <span style={{
+                width: 7, height: 7, borderRadius: 9999,
+                background: T.danger,
+                animation: "timerPulse 1.4s ease-in-out infinite",
+                display: "inline-block",
+              }} />
+              <span>{formatDuration(liveElapsed)}</span>
+            </button>
+          )}
           <button
             onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
             disabled={syncStatus === "syncing"}
@@ -3519,6 +3794,51 @@ export default function VocabApp() {
       <div style={{ padding: mobile ? "20px 16px 100px" : "32px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
         {view === "practice" && (
           <>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+              <button
+                onClick={activeSession ? stopTimer : startTimer}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 22px",
+                  background: activeSession ? T.dangerBg : T.accent,
+                  border: activeSession ? `1px solid rgba(196,72,62,0.25)` : "none",
+                  borderRadius: 9999,
+                  color: activeSession ? T.danger : T.bg,
+                  fontFamily: font.body, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  letterSpacing: 0.3,
+                  minWidth: 180,
+                  justifyContent: "center",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.88"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+              >
+                {activeSession ? (
+                  <>
+                    <span style={{
+                      width: 8, height: 8, borderRadius: 9999,
+                      background: T.danger,
+                      animation: "timerPulse 1.4s ease-in-out infinite",
+                    }} />
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
+                      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                    </svg>
+                    <span style={{ fontFamily: font.mono, fontVariantNumeric: "tabular-nums" }}>
+                      {formatDuration(liveElapsed)}
+                    </span>
+                    <span>{t.stopTimer}</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
+                      <polygon points="7,5 19,12 7,19" />
+                    </svg>
+                    <span>{t.startTimer}</span>
+                  </>
+                )}
+              </button>
+            </div>
             {dueCards.length === 0 ? (
               <div style={{ textAlign: "center", padding: "80px 20px" }}>
                 <div style={{ width: 48, height: 48, borderRadius: 24, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
@@ -3802,9 +4122,9 @@ export default function VocabApp() {
         {view === "heatmap" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: T.textTertiary }}>...</div>}>
           <RechartsModule>
-          {({ PieChart, Pie, Label, Tooltip: RechartsTooltip, Cell, AreaChart, Area, XAxis, CartesianGrid, ResponsiveContainer }) => (
+          {({ PieChart, Pie, Label, Tooltip: RechartsTooltip, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, BarChart, Bar }) => (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
               {[
                 { label: t.daysStudied, value: (() => {
                   const yr = new Date().getFullYear();
@@ -3827,6 +4147,14 @@ export default function VocabApp() {
                   if (!ad) return 0;
                   return (Object.values(practiceDays).reduce((a, b) => a + b, 0) / ad).toFixed(1);
                 })() },
+                { label: t.totalTime, value: (() => {
+                  const yr = String(new Date().getFullYear());
+                  const totalSec = Object.entries(studyTime)
+                    .filter(([d]) => d.startsWith(yr))
+                    .reduce((a, [, s]) => a + (s || 0), 0)
+                    + (activeSession ? liveElapsed : 0);
+                  return formatDuration(totalSec, { short: true });
+                })() },
               ].map((stat, i) => (
                 <div key={i} style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "14px 8px" : "22px 16px", textAlign: "center", boxShadow: T.shadow }}>
                   <div style={{ fontFamily: font.display, fontSize: mobile ? 22 : 32, fontWeight: 700, color: T.text }}>{stat.value}</div>
@@ -3834,6 +4162,83 @@ export default function VocabApp() {
                 </div>
               ))}
             </div>
+            {(() => {
+              const ranges = { day: 30, week: 12, month: 12, year: 5 };
+              const range = ranges[studyTimePeriod] || 12;
+              const data = aggregateStudyTime(studyTime, studyTimePeriod, range).map((b) => ({
+                ...b,
+                minutes: Math.round(b.seconds / 60),
+                hours: +(b.seconds / 3600).toFixed(2),
+                value: (studyTimePeriod === "month" || studyTimePeriod === "year") ? +(b.seconds / 3600).toFixed(2) : Math.round(b.seconds / 60),
+              }));
+              const yUnit = (studyTimePeriod === "month" || studyTimePeriod === "year") ? "h" : "m";
+              const hasAny = data.some((d) => d.seconds > 0);
+              return (
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 8px" : "22px 24px 14px", boxShadow: T.shadow, marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+                    <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text }}>
+                      {t.studyTimeReport}
+                    </div>
+                    <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
+                      {[
+                        { id: "day", label: t.periodDay },
+                        { id: "week", label: t.periodWeek },
+                        { id: "month", label: t.periodMonth },
+                        { id: "year", label: t.periodYear },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setStudyTimePeriod(opt.id)}
+                          style={{
+                            padding: "5px 14px",
+                            background: studyTimePeriod === opt.id ? T.bgCard : "transparent",
+                            border: "none", borderRadius: 9999,
+                            fontFamily: font.mono, fontSize: 11, fontWeight: 500,
+                            color: studyTimePeriod === opt.id ? T.text : T.textTertiary,
+                            cursor: "pointer", transition: "all 0.15s",
+                            boxShadow: studyTimePeriod === opt.id ? T.shadow : "none",
+                            letterSpacing: 0.5, textTransform: "lowercase",
+                          }}
+                          onMouseEnter={(e) => { if (studyTimePeriod !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
+                          onMouseLeave={(e) => { if (studyTimePeriod !== opt.id) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {hasAny ? (
+                    <ResponsiveContainer width="100%" height={mobile ? 180 : 220}>
+                      <BarChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                        <CartesianGrid stroke={T.border} strokeDasharray="2 4" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: T.textTertiary, fontFamily: font.mono, fontSize: 10 }} axisLine={{ stroke: T.border }} tickLine={false} interval={mobile && studyTimePeriod === "day" ? 4 : 0} />
+                        <YAxis tick={{ fill: T.textTertiary, fontFamily: font.mono, fontSize: 10 }} axisLine={false} tickLine={false} width={36} tickFormatter={(v) => `${v}${yUnit}`} />
+                        <RechartsTooltip
+                          cursor={{ fill: T.bgCardHover }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const d = payload[0].payload;
+                              return (
+                                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", boxShadow: T.shadowLg }}>
+                                  <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, marginBottom: 4 }}>{d.startDate}</div>
+                                  <div style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: T.text }}>{formatDuration(d.seconds, { short: true })}</div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="value" fill={T.accent} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div style={{ padding: "40px 20px", textAlign: "center", fontFamily: font.body, fontSize: 13, color: T.textTertiary }}>
+                      No study time logged yet — start the timer on the Study page.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 12 : 28, boxShadow: T.shadow, overflowX: "auto", marginBottom: 14 }}>
               <CalendarHeatmap practiceDays={practiceDays} year={heatmapYear} onYearChange={setHeatmapYear} />
             </div>
@@ -4192,6 +4597,17 @@ export default function VocabApp() {
           </RechartsModule>
           </Suspense>
         )}
+        {timerToast && (
+          <div style={{
+            position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+            background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+            padding: "12px 20px", boxShadow: T.shadowLg,
+            fontFamily: font.body, fontSize: 13, color: T.text,
+            zIndex: 200, maxWidth: "90vw",
+          }}>
+            {timerToast.message}
+          </div>
+        )}
         <Modal open={showSettingsModal} onClose={() => setShowSettingsModal(false)} title={t.settingsTitle}>
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 18 : 28, boxShadow: T.shadow }}>
@@ -4390,6 +4806,52 @@ export default function VocabApp() {
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                     </svg>
                     {t.exportButton} {cards.length} {cards.length === 1 ? t.cardAs : t.cardsAs}
+                  </button>
+                </div>
+                <div style={{ height: 1, background: T.border }} />
+                <div>
+                  <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
+                    {t.exportStudyTime}
+                  </div>
+                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12 }}>
+                    {t.exportStudyTimeDesc}
+                  </div>
+                  <button
+                    onClick={() => {
+                      const entries = Object.entries(studyTime).filter(([, sec]) => sec > 0).sort((a, b) => a[0].localeCompare(b[0]));
+                      const header = "date,minutes,hours,session_count\n";
+                      const rows = entries.map(([date, sec]) => {
+                        const minutes = Math.round(sec / 60);
+                        const hours = (sec / 3600).toFixed(2);
+                        return `${date},${minutes},${hours},1`;
+                      }).join("\n");
+                      const totalSec = entries.reduce((a, [, s]) => a + s, 0);
+                      const summary = `\n\ntotal_seconds,${totalSec}\ntotal_minutes,${Math.round(totalSec / 60)}\ntotal_hours,${(totalSec / 3600).toFixed(2)}\n`;
+                      const blob = new Blob([header + rows + summary], { type: "text/csv" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url; a.download = `vocabulario_study_time_${today()}.csv`; a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    disabled={Object.values(studyTime).every((v) => !v)}
+                    style={{
+                      padding: "11px 24px",
+                      background: Object.values(studyTime).some((v) => v) ? "transparent" : T.bgInput,
+                      border: `1px solid ${Object.values(studyTime).some((v) => v) ? T.border : "transparent"}`,
+                      borderRadius: T.radiusSm,
+                      color: Object.values(studyTime).some((v) => v) ? T.textSecondary : T.textPlaceholder,
+                      fontFamily: font.body, fontSize: 13, fontWeight: 500,
+                      cursor: Object.values(studyTime).some((v) => v) ? "pointer" : "default",
+                      display: "flex", alignItems: "center", gap: 8,
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(e) => { if (Object.values(studyTime).some((v) => v)) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                    onMouseLeave={(e) => { if (Object.values(studyTime).some((v) => v)) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    {t.exportStudyTime}
                   </button>
                 </div>
                 <div style={{ height: 1, background: T.border }} />
