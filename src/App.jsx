@@ -3654,7 +3654,6 @@ export default function VocabApp() {
         button:active { transform: scale(0.98); }
         [contenteditable] b, [contenteditable] strong { color: ${T.keyword}; font-weight: 700; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        @keyframes timerPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
         .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
@@ -3683,12 +3682,6 @@ export default function VocabApp() {
               onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
               onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
             >
-              <span style={{
-                width: 7, height: 7, borderRadius: 9999,
-                background: T.danger,
-                animation: "timerPulse 1.4s ease-in-out infinite",
-                display: "inline-block",
-              }} />
               <span>{formatDuration(liveElapsed)}</span>
             </button>
           )}
@@ -3816,11 +3809,6 @@ export default function VocabApp() {
               >
                 {activeSession ? (
                   <>
-                    <span style={{
-                      width: 8, height: 8, borderRadius: 9999,
-                      background: T.danger,
-                      animation: "timerPulse 1.4s ease-in-out infinite",
-                    }} />
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
                       <rect x="6" y="6" width="12" height="12" rx="1.5" />
                     </svg>
