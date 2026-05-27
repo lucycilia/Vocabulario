@@ -101,6 +101,7 @@ const FSRS = {
     suspended: false,
     created: localDateStr(),
     modifiedAt: Date.now(),
+    suspended: false,
   }),
   // Review a card with a grade (1=Forgot, 2=Hard, 3=Good, 4=Easy)
   review: (card, grade) => {
@@ -1916,7 +1917,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
   );
 }));
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirection, answerMode = "type" }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode = "type" }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -2028,6 +2029,22 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
         onMouseEnter={(e) => { if (!editing) e.currentTarget.style.borderColor = T.borderStrong; }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
       >
+        {!editing && onSuspend && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onSuspend(card.id); }}
+            aria-label={t.suspend}
+            title={t.suspend}
+            style={{
+              position: "absolute", top: mobile ? 10 : 14, right: mobile ? 40 : 46,
+              background: "transparent", border: "none", cursor: "pointer",
+              padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
+          >
+            <SuspendIcon size={16} color={T.textSecondary} />
+          </button>
+        )}
         {!editing && onUpdate && (
           <button
             onClick={startEdit}
@@ -2667,7 +2684,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="1.8" strokeLinecap="round">
                 <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
               </svg>
-              excluir palavra
+              {t.deleteWord}
             </button>
           </div>
         )}
@@ -4183,7 +4200,7 @@ export default function VocabApp() {
                     ))}
                   </div>
                 </div>
-                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} />
+                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} />
                 {(dueReview > 0 || dueNew > 0) && (
                   <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
                     <span style={{
@@ -4323,53 +4340,101 @@ export default function VocabApp() {
                     </span>
                   ))}
                 </div>
-                {groupByStage ? (
-                  ["new", "learning", "young", "mature", "mastered"].map(stage => {
-                    const stageCards = filteredCards.filter(c => getStage(c) === stage).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
-                    if (stageCards.length === 0) return null;
-                    const sc = stageColors[stage];
-                    const isDark = T.bg === "#0E0E0E";
-                    const isCollapsed = collapsedGroups.has(stage);
-                    return (
-                      <div key={stage}>
-                        <div
-                          onClick={() => toggleGroup(stage)}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 10,
-                            padding: "10px 20px",
-                            background: sc.bg,
-                            borderBottom: `1px solid ${T.border}`,
-                            cursor: "pointer", userSelect: "none",
-                            position: "sticky", top: 0, zIndex: 2,
-                            transition: "filter 0.15s",
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(0.97)"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isDark ? sc.darkText : sc.text} strokeWidth="2.5" strokeLinecap="round"
-                            style={{ transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+                {(() => {
+                  const activeCards = filteredCards.filter(c => !c.suspended);
+                  const suspendedCards = filteredCards.filter(c => c.suspended);
+                  const isDark = T.bg === "#0E0E0E";
+                  const suspendedCollapsed = collapsedGroups.has("suspended");
+                  return (
+                    <>
+                      {groupByStage ? (
+                        ["new", "learning", "young", "mature", "mastered"].map(stage => {
+                          // Sub-sort by newest-added within each stage group.
+                          const stageCards = activeCards.filter(c => getStage(c) === stage).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
+                          if (stageCards.length === 0) return null;
+                          const sc = stageColors[stage];
+                          const isCollapsed = collapsedGroups.has(stage);
+                          return (
+                            <div key={stage}>
+                              <div
+                                onClick={() => toggleGroup(stage)}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 10,
+                                  padding: "10px 20px",
+                                  background: sc.bg,
+                                  borderBottom: `1px solid ${T.border}`,
+                                  cursor: "pointer", userSelect: "none",
+                                  position: "sticky", top: 0, zIndex: 2,
+                                  transition: "filter 0.15s",
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(0.97)"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isDark ? sc.darkText : sc.text} strokeWidth="2.5" strokeLinecap="round"
+                                  style={{ transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+                                >
+                                  <polyline points="6 9 12 15 18 9"/>
+                                </svg>
+                                <span style={{
+                                  fontFamily: font.mono, fontSize: 11, padding: "3px 10px", borderRadius: 20, letterSpacing: 0.5,
+                                  background: sc.bg, color: isDark ? sc.darkText : sc.text, fontWeight: 600,
+                                }}>
+                                  {stageLabel(stage)}
+                                </span>
+                                <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
+                                  {stageCards.length}
+                                </span>
+                              </div>
+                              {!isCollapsed && stageCards.map(card => (
+                                <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
+                              ))}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        activeCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />)
+                      )}
+                      {suspendedCards.length > 0 && (
+                        <div style={{ opacity: 0.6 }}>
+                          <div
+                            onClick={() => toggleGroup("suspended")}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              padding: "10px 20px",
+                              background: T.bgCardHover,
+                              borderTop: `1px solid ${T.border}`,
+                              borderBottom: `1px solid ${T.border}`,
+                              cursor: "pointer", userSelect: "none",
+                              position: "sticky", top: 0, zIndex: 2,
+                              transition: "filter 0.15s",
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(0.97)"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
                           >
-                            <polyline points="6 9 12 15 18 9"/>
-                          </svg>
-                          <span style={{
-                            fontFamily: font.mono, fontSize: 11, padding: "3px 10px", borderRadius: 20, letterSpacing: 0.5,
-                            background: sc.bg, color: isDark ? sc.darkText : sc.text, fontWeight: 600,
-                          }}>
-                            {stageLabel(stage)}
-                          </span>
-                          <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
-                            {stageCards.length}
-                          </span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2.5" strokeLinecap="round"
+                              style={{ transform: suspendedCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+                            >
+                              <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                            <SuspendIcon size={14} color={T.textSecondary} />
+                            <span style={{
+                              fontFamily: font.mono, fontSize: 11, padding: "3px 10px", borderRadius: 20, letterSpacing: 0.5,
+                              background: T.bgInput, color: T.textSecondary, fontWeight: 600, textTransform: "uppercase",
+                            }}>
+                              {t.suspended}
+                            </span>
+                            <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
+                              {suspendedCards.length}
+                            </span>
+                          </div>
+                          {!suspendedCollapsed && suspendedCards.map(card => (
+                            <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
+                          ))}
                         </div>
-                        {!isCollapsed && stageCards.map(card => (
-                          <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
-                        ))}
-                      </div>
-                    );
-                  })
-                ) : (
-                  filteredCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />)
-                )}
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </>
