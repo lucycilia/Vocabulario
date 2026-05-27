@@ -97,6 +97,7 @@ const FSRS = {
     lastReview: null,
     created: localDateStr(),
     modifiedAt: Date.now(),
+    suspended: false,
   }),
   // Review a card with a grade (1=Forgot, 2=Hard, 3=Good, 4=Easy)
   review: (card, grade) => {
@@ -920,6 +921,9 @@ const i18n = {
     writeHint: "escreva sua resposta, depois toque para revelar",
     listenPronunciation: "ouvir pronúncia",
     stopPronunciation: "parar",
+    suspend: "suspender",
+    unsuspend: "reativar",
+    suspended: "suspensas",
     skip: "Pular",
     forgot: "Esqueci",
     partiallyRecalled: "Parcialmente",
@@ -1067,6 +1071,9 @@ const i18n = {
     writeHint: "write your answer, then tap to reveal",
     listenPronunciation: "listen to pronunciation",
     stopPronunciation: "stop",
+    suspend: "suspend",
+    unsuspend: "unsuspend",
+    suspended: "suspended",
     skip: "Skip",
     forgot: "Forgot",
     partiallyRecalled: "Partially recalled",
@@ -1429,6 +1436,26 @@ function PencilIcon({ size = 18, color = T.textTertiary }) {
     </svg>
   );
 }
+function SuspendIcon({ size = 18, color = T.textTertiary }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="2" x2="12" y2="22" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="m9 5 3 3 3-3" />
+      <path d="m9 19 3-3 3 3" />
+      <path d="m5 9 3 3-3 3" />
+      <path d="m19 9-3 3 3 3" />
+    </svg>
+  );
+}
+function UnsuspendIcon({ size = 18, color = T.textTertiary }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+  );
+}
 // ─── Add Card Form ───
 function AddCardForm({ onAdd, onCancel }) {
   const [ptText, setPtText] = useState("");
@@ -1641,7 +1668,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
   );
 }));
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirection, answerMode = "passive" }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode = "passive" }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -1753,6 +1780,22 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
         onMouseEnter={(e) => { if (!editing) e.currentTarget.style.borderColor = T.borderStrong; }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
       >
+        {!editing && onSuspend && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onSuspend(card.id); }}
+            aria-label={t.suspend}
+            title={t.suspend}
+            style={{
+              position: "absolute", top: mobile ? 10 : 14, right: mobile ? 40 : 46,
+              background: "transparent", border: "none", cursor: "pointer",
+              padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
+          >
+            <SuspendIcon size={16} color={T.textSecondary} />
+          </button>
+        )}
         {!editing && onUpdate && (
           <button
             onClick={startEdit}
@@ -2026,7 +2069,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, totalDue, studyDirecti
   );
 }
 // ─── Word Row ───
-const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
+const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSuspend, onUnsuspend }) {
   const mobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const isOverdue = card.dueDate <= today();
@@ -2150,6 +2193,35 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
                     <SpeakerIcon size={14} color={T.textTertiary} />
                     {t.listenPronunciation}
                   </button>
+                  {card.suspended ? (
+                    onUnsuspend && (
+                      <button
+                        onClick={() => { onUnsuspend(card.id); setMenuOpen(false); }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                          background: "none", border: "none", cursor: "pointer",
+                          fontFamily: font.body, fontSize: 13, color: T.textSecondary, textAlign: "left",
+                        }}
+                      >
+                        <UnsuspendIcon size={14} color={T.textTertiary} />
+                        {t.unsuspend}
+                      </button>
+                    )
+                  ) : (
+                    onSuspend && (
+                      <button
+                        onClick={() => { onSuspend(card.id); setMenuOpen(false); }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                          background: "none", border: "none", cursor: "pointer",
+                          fontFamily: font.body, fontSize: 13, color: T.textSecondary, textAlign: "left",
+                        }}
+                      >
+                        <SuspendIcon size={14} color={T.textTertiary} />
+                        {t.suspend}
+                      </button>
+                    )
+                  )}
                   <button
                     onClick={() => { onDelete(card.id); setMenuOpen(false); }}
                     style={{
@@ -2273,6 +2345,41 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
               <SpeakerIcon size={14} color={T.textTertiary} />
               {t.listenPronunciation}
             </button>
+            {card.suspended ? (
+              onUnsuspend && (
+                <button
+                  onClick={() => { onUnsuspend(card.id); setMenuOpen(false); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                    background: "none", border: "none", cursor: "pointer",
+                    fontFamily: font.body, fontSize: 13, color: T.textSecondary, textAlign: "left",
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                >
+                  <UnsuspendIcon size={14} color={T.textTertiary} />
+                  {t.unsuspend}
+                </button>
+              )
+            ) : (
+              onSuspend && (
+                <button
+                  onClick={() => { onSuspend(card.id); setMenuOpen(false); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                    background: "none", border: "none", cursor: "pointer",
+                    fontFamily: font.body, fontSize: 13, color: T.textSecondary, textAlign: "left",
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                >
+                  <SuspendIcon size={14} color={T.textTertiary} />
+                  {t.suspend}
+                </button>
+              )
+            )}
             <button
               onClick={() => { onDelete(card.id); setMenuOpen(false); }}
               style={{
@@ -2287,7 +2394,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate }) {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="1.8" strokeLinecap="round">
                 <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
               </svg>
-              excluir palavra
+              {t.deleteWord}
             </button>
           </div>
         )}
@@ -3349,11 +3456,25 @@ export default function VocabApp() {
   };
   const [skippedIds, setSkippedIds] = useState(new Set());
   const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };
+  const suspendCard = useCallback((id) => {
+    setCards((prev) => {
+      const nc = prev.map((c) => c.id === id ? { ...c, suspended: true, modifiedAt: Date.now() } : c);
+      setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
+      return nc;
+    });
+  }, [save]);
+  const unsuspendCard = useCallback((id) => {
+    setCards((prev) => {
+      const nc = prev.map((c) => c.id === id ? { ...c, suspended: false, modifiedAt: Date.now() } : c);
+      setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
+      return nc;
+    });
+  }, [save]);
   // Tick every 30s so forgot-cards (10min delay) reappear automatically
   const [tick, setTick] = useState(0);
   useEffect(() => { const id = setInterval(() => setTick((t) => t + 1), 30000); return () => clearInterval(id); }, []);
   const dueCards = useMemo(() => {
-    let due = cards.filter((c) => c.dueDate <= today() && !skippedIds.has(c.id) && (!c.dueAfter || Date.now() >= c.dueAfter));
+    let due = cards.filter((c) => !c.suspended && c.dueDate <= today() && !skippedIds.has(c.id) && (!c.dueAfter || Date.now() >= c.dueAfter));
     if (settings.cardOrder === "newest") {
       return due.sort((a, b) => b.id.localeCompare(a.id));
     }
@@ -3611,7 +3732,7 @@ export default function VocabApp() {
                     ))}
                   </div>
                 </div>
-                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} />
+                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} />
                 {(dueReview > 0 || dueNew > 0) && (
                   <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
                     <span style={{
@@ -3748,53 +3869,100 @@ export default function VocabApp() {
                     </span>
                   ))}
                 </div>
-                {groupByStage ? (
-                  ["new", "learning", "young", "mature", "mastered"].map(stage => {
-                    const stageCards = filteredCards.filter(c => getStage(c) === stage);
-                    if (stageCards.length === 0) return null;
-                    const sc = stageColors[stage];
-                    const isDark = T.bg === "#0E0E0E";
-                    const isCollapsed = collapsedGroups.has(stage);
-                    return (
-                      <div key={stage}>
-                        <div
-                          onClick={() => toggleGroup(stage)}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 10,
-                            padding: "10px 20px",
-                            background: sc.bg,
-                            borderBottom: `1px solid ${T.border}`,
-                            cursor: "pointer", userSelect: "none",
-                            position: "sticky", top: 0, zIndex: 2,
-                            transition: "filter 0.15s",
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(0.97)"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isDark ? sc.darkText : sc.text} strokeWidth="2.5" strokeLinecap="round"
-                            style={{ transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+                {(() => {
+                  const activeCards = filteredCards.filter(c => !c.suspended);
+                  const suspendedCards = filteredCards.filter(c => c.suspended);
+                  const isDark = T.bg === "#0E0E0E";
+                  const suspendedCollapsed = collapsedGroups.has("suspended");
+                  return (
+                    <>
+                      {groupByStage ? (
+                        ["new", "learning", "young", "mature", "mastered"].map(stage => {
+                          const stageCards = activeCards.filter(c => getStage(c) === stage);
+                          if (stageCards.length === 0) return null;
+                          const sc = stageColors[stage];
+                          const isCollapsed = collapsedGroups.has(stage);
+                          return (
+                            <div key={stage}>
+                              <div
+                                onClick={() => toggleGroup(stage)}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 10,
+                                  padding: "10px 20px",
+                                  background: sc.bg,
+                                  borderBottom: `1px solid ${T.border}`,
+                                  cursor: "pointer", userSelect: "none",
+                                  position: "sticky", top: 0, zIndex: 2,
+                                  transition: "filter 0.15s",
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(0.97)"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isDark ? sc.darkText : sc.text} strokeWidth="2.5" strokeLinecap="round"
+                                  style={{ transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+                                >
+                                  <polyline points="6 9 12 15 18 9"/>
+                                </svg>
+                                <span style={{
+                                  fontFamily: font.mono, fontSize: 11, padding: "3px 10px", borderRadius: 20, letterSpacing: 0.5,
+                                  background: sc.bg, color: isDark ? sc.darkText : sc.text, fontWeight: 600,
+                                }}>
+                                  {stageLabel(stage)}
+                                </span>
+                                <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
+                                  {stageCards.length}
+                                </span>
+                              </div>
+                              {!isCollapsed && stageCards.map(card => (
+                                <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
+                              ))}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        activeCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />)
+                      )}
+                      {suspendedCards.length > 0 && (
+                        <div style={{ opacity: 0.6 }}>
+                          <div
+                            onClick={() => toggleGroup("suspended")}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              padding: "10px 20px",
+                              background: T.bgCardHover,
+                              borderTop: `1px solid ${T.border}`,
+                              borderBottom: `1px solid ${T.border}`,
+                              cursor: "pointer", userSelect: "none",
+                              position: "sticky", top: 0, zIndex: 2,
+                              transition: "filter 0.15s",
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.filter = "brightness(0.97)"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
                           >
-                            <polyline points="6 9 12 15 18 9"/>
-                          </svg>
-                          <span style={{
-                            fontFamily: font.mono, fontSize: 11, padding: "3px 10px", borderRadius: 20, letterSpacing: 0.5,
-                            background: sc.bg, color: isDark ? sc.darkText : sc.text, fontWeight: 600,
-                          }}>
-                            {stageLabel(stage)}
-                          </span>
-                          <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
-                            {stageCards.length}
-                          </span>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2.5" strokeLinecap="round"
+                              style={{ transform: suspendedCollapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+                            >
+                              <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                            <SuspendIcon size={14} color={T.textSecondary} />
+                            <span style={{
+                              fontFamily: font.mono, fontSize: 11, padding: "3px 10px", borderRadius: 20, letterSpacing: 0.5,
+                              background: T.bgInput, color: T.textSecondary, fontWeight: 600, textTransform: "uppercase",
+                            }}>
+                              {t.suspended}
+                            </span>
+                            <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>
+                              {suspendedCards.length}
+                            </span>
+                          </div>
+                          {!suspendedCollapsed && suspendedCards.map(card => (
+                            <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
+                          ))}
                         </div>
-                        {!isCollapsed && stageCards.map(card => (
-                          <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} />
-                        ))}
-                      </div>
-                    );
-                  })
-                ) : (
-                  filteredCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} />)
-                )}
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
           </>
