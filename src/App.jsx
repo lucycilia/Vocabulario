@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle, Fragment } from "react";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -159,8 +159,11 @@ const FSRS = {
       dueDate: grade === 1 ? localDateStr() : localDateStr(due),
       dueAfter,
       lastReview: localDateStr(),
-      // Mark when this card was first reviewed — used for the daily new-card cap
-      firstReviewedAt: card.firstReviewedAt || localDateStr(),
+      // Only mark firstReviewedAt when this is genuinely the card's first review
+      // (reps was 0). For already-graduated cards (reps > 0), leave it alone — they
+      // were "introduced" long ago, not today, and counting them would shrink the
+      // daily new-card slot pool incorrectly.
+      firstReviewedAt: card.firstReviewedAt || (reps === 0 ? localDateStr() : null),
       // Clear the "study next" priority flag once the card has been introduced
       priority: false,
       // Reset learning step now that we've graduated
@@ -263,7 +266,41 @@ const stageLabel = (stage) => {
   return t[map[stage]] || stage;
 };
 // ─── Import Parsers ───
-const looksPortuguese = (text) => /[ãõçêéáíóúâô]/i.test(text);
+// Function words that strongly indicate one language. Ambiguous words ("a", "no", "as")
+// are intentionally excluded to avoid double-counting against the other language.
+const PT_WORDS = new Set([
+  "que","não","para","com","está","são","tem","uma","isso","mais","também",
+  "porque","quando","muito","sempre","pelo","pela","do","da","dos","das",
+  "em","ele","ela","um","os","meu","minha","seu","sua","foi","ser","vai",
+  "vou","quer","mas","se","até","depois","antes","aqui","ali","também",
+]);
+const EN_WORDS = new Set([
+  "the","and","of","to","in","is","are","was","were","be","been","have",
+  "has","had","this","that","they","them","with","for","you","your",
+  "what","when","my","we","our","it","its","he","she","his","her",
+  "at","on","by","from","will","would","can","could",
+]);
+// Score how Portuguese a text looks. Positive = leans PT, negative = leans EN.
+// Used to compare two sides of a card and decide which is which.
+const ptScore = (text) => {
+  if (!text) return 0;
+  let score = 0;
+  // Diacritics: strongest signal — Portuguese-specific accented characters.
+  const diacritics = (text.match(/[ãõçêéáíóúâô]/gi) || []).length;
+  score += diacritics * 3;
+  // Word-level signals.
+  const words = text.toLowerCase().match(/\b[\wàâãäåçèéêëìíîïñòóôõöùúûüý']+\b/g) || [];
+  for (const w of words) {
+    if (PT_WORDS.has(w)) score += 1;
+    if (EN_WORDS.has(w)) score -= 1;
+  }
+  // Distinctive Portuguese bigrams/trigrams.
+  if (/ção|ções|ões/i.test(text)) score += 3;
+  else if (/lh|nh/i.test(text)) score += 1;
+  return score;
+};
+// Backwards-compat alias for code paths that just want a yes/no.
+const looksPortuguese = (text) => ptScore(text) > 0;
 const parseImportLine = (line) => {
   line = line.trim();
   if (!line || line.startsWith("#") || line.startsWith("//")) return null;
@@ -290,7 +327,9 @@ const parseImportLine = (line) => {
   if (!parts || parts.length < 2) return null;
   let ptSide = parts[0].trim();
   let enSide = parts.slice(1).join(", ").trim();
-  if (!looksPortuguese(ptSide) && looksPortuguese(enSide)) {
+  // Compare the two sides — whichever scores higher as Portuguese is treated as PT.
+  // Tie or both zero: preserve original order.
+  if (ptScore(enSide) > ptScore(ptSide)) {
     [ptSide, enSide] = [enSide, ptSide];
   }
   if (!ptSide || !enSide) return null;
@@ -1111,7 +1150,6 @@ const i18n = {
     check: "Verificar",
     yourAnswer: "Sua resposta",
     clear: "Limpar",
-    writeHint: "escreva sua resposta, depois toque para revelar",
     listenPronunciation: "ouvir pronúncia",
     stopPronunciation: "parar",
     suspend: "suspender",
@@ -1127,11 +1165,11 @@ const i18n = {
     noTimeLogs: "Nenhum registro de tempo ainda.",
     minutesLabel: "min",
     deleteEntry: "excluir",
-    studyTimeReport: "tempo de estudo",
-    periodDay: "dia",
-    periodWeek: "semana",
-    periodMonth: "mês",
-    periodYear: "ano",
+    studyTimeReport: "Tempo de estudo",
+    periodDay: "Dia",
+    periodWeek: "Semana",
+    periodMonth: "Mês",
+    periodYear: "Ano",
     exportStudyTime: "exportar tempo",
     exportStudyTimeDesc: "Baixe seu tempo de estudo como CSV (uma linha por dia).",
     skip: "Pular",
@@ -1266,8 +1304,6 @@ const i18n = {
     sheetsSynced: "Sincronizado ✓",
     sheetsError: "Erro de sincronização",
     sheetsLastSync: "Última sincronização",
-    enToPt: "EN → PT",
-    ptToEn: "PT → EN",
     searchPlaceholder: "buscar palavras ou frases...",
     groupByStage: "agrupar",
   },
@@ -1288,7 +1324,6 @@ const i18n = {
     check: "Check",
     yourAnswer: "Your answer",
     clear: "Clear",
-    writeHint: "write your answer, then tap to reveal",
     listenPronunciation: "listen to pronunciation",
     stopPronunciation: "stop",
     suspend: "suspend",
@@ -1304,11 +1339,11 @@ const i18n = {
     noTimeLogs: "No time logs yet.",
     minutesLabel: "min",
     deleteEntry: "delete",
-    studyTimeReport: "study time",
-    periodDay: "day",
-    periodWeek: "week",
-    periodMonth: "month",
-    periodYear: "year",
+    studyTimeReport: "Study time",
+    periodDay: "Day",
+    periodWeek: "Week",
+    periodMonth: "Month",
+    periodYear: "Year",
     exportStudyTime: "export time",
     exportStudyTimeDesc: "Download your study time as CSV (one row per day).",
     skip: "Skip",
@@ -1443,8 +1478,6 @@ const i18n = {
     sheetsSynced: "Synced ✓",
     sheetsError: "Sync error",
     sheetsLastSync: "Last synced",
-    enToPt: "EN → PT",
-    ptToEn: "PT → EN",
     searchPlaceholder: "search words or phrases...",
     groupByStage: "group",
   },
@@ -1508,25 +1541,25 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button onClick={() => onYearChange(year - 1)} style={{
-            background: T.bgInput, border: `1px solid ${T.borderStrong}`, color: T.text,
-            borderRadius: 9999, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
-            fontSize: 14, fontWeight: 500, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "background 0.15s",
+            background: T.accentSoft, border: `1px solid ${T.border}`, color: T.text,
+            borderRadius: 9999, width: 34, height: 34, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "all 0.2s",
           }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = T.bgCardHover; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = T.bgInput; }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
           </button>
           <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 600, color: T.text, minWidth: 48, textAlign: "center" }}>{year}</span>
           <button onClick={() => onYearChange(year + 1)} style={{
-            background: T.bgInput, border: `1px solid ${T.borderStrong}`, color: T.text,
-            borderRadius: 9999, padding: "6px 12px", cursor: "pointer", fontFamily: font.body,
-            fontSize: 14, fontWeight: 500, lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
-            transition: "background 0.15s",
+            background: T.accentSoft, border: `1px solid ${T.border}`, color: T.text,
+            borderRadius: 9999, width: 34, height: 34, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "all 0.2s",
           }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = T.bgCardHover; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = T.bgInput; }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
@@ -1625,39 +1658,121 @@ const yearBtnStyle = {
   lineHeight: 1,
 };
 // ─── HTML Bold Parser ───
+// Detect whether a DOM element is rendering as bold. Browsers in contentEditable
+// produce many shapes: <b>, <strong>, <span style="font-weight:bold">, numeric weights,
+// or a parent with `font-weight` inherited. We check both inline styles and computed styles.
+const isElementBold = (node) => {
+  const tag = node.tagName ? node.tagName.toLowerCase() : "";
+  if (tag === "b" || tag === "strong") return true;
+  const fw = node.style && node.style.fontWeight;
+  if (fw) {
+    const s = String(fw).toLowerCase().trim();
+    if (s === "bold" || s === "bolder") return true;
+    const n = parseInt(s, 10);
+    if (!isNaN(n) && n >= 600) return true;
+  }
+  // Last resort: read the computed style if the node is in the DOM
+  if (node.ownerDocument && node.ownerDocument.defaultView) {
+    try {
+      const cs = node.ownerDocument.defaultView.getComputedStyle(node);
+      const cfw = cs && cs.fontWeight;
+      if (cfw) {
+        const s = String(cfw).toLowerCase().trim();
+        if (s === "bold" || s === "bolder") return true;
+        const n = parseInt(s, 10);
+        if (!isNaN(n) && n >= 600) return true;
+      }
+    } catch {}
+  }
+  return false;
+};
 const parseHtmlBold = (html) => {
   const tmp = document.createElement("div");
   tmp.innerHTML = html;
   let plain = "";
-  let kwStart = null, kwEnd = null, kwText = "";
-  const walk = (node) => {
-    if (node.nodeType === 3) { plain += node.textContent; }
-    else if (node.nodeType === 1) {
-      const tag = node.tagName.toLowerCase();
-      const isBold = tag === "b" || tag === "strong" || (node.style && node.style.fontWeight && parseInt(node.style.fontWeight) >= 700);
-      if (isBold && kwStart === null) kwStart = plain.length;
-      for (const child of node.childNodes) walk(child);
-      if (isBold && kwStart !== null && kwEnd === null) { kwEnd = plain.length; kwText = plain.slice(kwStart, kwEnd); }
-    }
+  const rawSpans = []; // array of [start, end] pairs, one per bold run
+  const walk = (node, inheritedBold = false) => {
+    if (node.nodeType === 3) { plain += node.textContent; return; }
+    if (node.nodeType !== 1) return;
+    const isBold = inheritedBold || isElementBold(node);
+    const start = plain.length;
+    for (const child of node.childNodes) walk(child, isBold);
+    const end = plain.length;
+    // Only outermost bolds push a span — avoids double-counting nested <b><strong>...
+    if (isBold && !inheritedBold && end > start) rawSpans.push([start, end]);
   };
   for (const child of tmp.childNodes) walk(child);
-  return { plain, kwStart, kwEnd, kwText };
+  // Merge adjacent / overlapping spans (Chrome often emits <b>a</b><b>b</b> as two runs)
+  rawSpans.sort((a, b) => a[0] - b[0]);
+  const spans = [];
+  for (const [s, e] of rawSpans) {
+    if (spans.length && s <= spans[spans.length - 1][1]) {
+      spans[spans.length - 1][1] = Math.max(spans[spans.length - 1][1], e);
+    } else {
+      spans.push([s, e]);
+    }
+  }
+  // Derived/legacy fields for backwards compatibility with old callers
+  const kwTexts = spans.map(([s, e]) => plain.slice(s, e));
+  const kwText = kwTexts.join(" | ");
+  const kwStart = spans.length > 0 ? spans[0][0] : null;
+  const kwEnd = spans.length > 0 ? spans[0][1] : null;
+  return { plain, spans, kwStart, kwEnd, kwText, kwTexts };
+};
+// Resolve a card's keyword spans, supporting both new (keywordSpans) and legacy (keywordStart/keywordEnd) shapes.
+const getKeywordSpans = (card) => {
+  if (Array.isArray(card.keywordSpans) && card.keywordSpans.length > 0) {
+    return card.keywordSpans.filter(([s, e]) => typeof s === "number" && typeof e === "number" && e > s);
+  }
+  if (card.keywordStart !== undefined && card.keywordEnd !== undefined && card.keywordStart !== card.keywordEnd) {
+    return [[card.keywordStart, card.keywordEnd]];
+  }
+  return [];
+};
+// Rebuild HTML from a phrase + spans (used when opening the edit modal).
+const phraseToHtml = (phrase, spans, escapeFn) => {
+  const esc = escapeFn || ((s) => s);
+  if (!phrase) return "";
+  if (!spans || spans.length === 0) return esc(phrase);
+  const sorted = [...spans].sort((a, b) => a[0] - b[0]);
+  let html = "";
+  let cursor = 0;
+  for (const [start, end] of sorted) {
+    const s = Math.max(cursor, start);
+    if (s > cursor) html += esc(phrase.slice(cursor, s));
+    if (end > s) html += "<b>" + esc(phrase.slice(s, end)) + "</b>";
+    cursor = Math.max(cursor, end);
+  }
+  if (cursor < phrase.length) html += esc(phrase.slice(cursor));
+  return html;
 };
 // ─── Phrase Display ───
-function PhraseDisplay({ phrase, keywordStart, keywordEnd, size = "normal" }) {
+function PhraseDisplay({ phrase, spans, keywordStart, keywordEnd, size = "normal" }) {
   if (!phrase) return null;
-  const before = phrase.slice(0, keywordStart);
-  const keyword = phrase.slice(keywordStart, keywordEnd);
-  const after = phrase.slice(keywordEnd);
+  // Resolve spans: new prop wins, otherwise fall back to legacy single-span props.
+  let effective = Array.isArray(spans) ? spans : null;
+  if ((!effective || effective.length === 0) &&
+      keywordStart !== undefined && keywordEnd !== undefined && keywordStart !== keywordEnd) {
+    effective = [[keywordStart, keywordEnd]];
+  }
   const fs = size === "large" ? 20 : size === "practice" ? 24 : 14;
   const textColor = size === "practice" ? T.text : T.textSecondary;
-  return (
-    <span style={{ fontSize: fs, lineHeight: 1.7, fontFamily: font.body, fontWeight: 400 }}>
-      <span style={{ color: textColor }}>{before}</span>
-      <span style={{ color: T.keyword, fontWeight: 700, background: T.keywordBg, padding: "2px 4px", borderRadius: 4 }}>{keyword}</span>
-      <span style={{ color: textColor }}>{after}</span>
-    </span>
-  );
+  const boldStyle = { color: T.keyword, fontWeight: 700, background: T.keywordBg, padding: "2px 4px", borderRadius: 4 };
+  const wrap = { fontSize: fs, lineHeight: 1.7, fontFamily: font.body, fontWeight: 400 };
+  if (!effective || effective.length === 0) {
+    return <span style={wrap}><span style={{ color: textColor }}>{phrase}</span></span>;
+  }
+  const sorted = [...effective].sort((a, b) => a[0] - b[0]);
+  const parts = [];
+  let cursor = 0;
+  sorted.forEach(([start, end], i) => {
+    const s = Math.max(cursor, start);
+    if (s > cursor) parts.push(<span key={`p${i}`} style={{ color: textColor }}>{phrase.slice(cursor, s)}</span>);
+    if (end > s) parts.push(<span key={`b${i}`} style={boldStyle}>{phrase.slice(s, end)}</span>);
+    cursor = Math.max(cursor, end);
+  });
+  if (cursor < phrase.length) parts.push(<span key="tail" style={{ color: textColor }}>{phrase.slice(cursor)}</span>);
+  return <span style={wrap}>{parts}</span>;
 }
 // ─── Speaker Icon ───
 function SpeakerIcon({ size = 18, color = T.textTertiary }) {
@@ -1685,23 +1800,23 @@ function PencilIcon({ size = 18, color = T.textTertiary }) {
     </svg>
   );
 }
+// Closed eye — represents "suspend" (hide this card from the queue)
 function SuspendIcon({ size = 18, color = T.textTertiary }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="2" x2="12" y2="22" />
-      <line x1="2" y1="12" x2="22" y2="12" />
-      <path d="m9 5 3 3 3-3" />
-      <path d="m9 19 3-3 3 3" />
-      <path d="m5 9 3 3-3 3" />
-      <path d="m19 9-3 3 3 3" />
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+      <path d="m14.12 14.12-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
     </svg>
   );
 }
+// Open eye — represents "unsuspend" (bring the card back into rotation)
 function UnsuspendIcon({ size = 18, color = T.textTertiary }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   );
 }
@@ -1917,7 +2032,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
   );
 }));
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode = "type" }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode = "type", setAnswerMode }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -1949,11 +2064,9 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
   const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const startEdit = (e) => {
     e.stopPropagation();
-    if (card.phrase && card.keywordStart !== undefined && card.keywordEnd !== undefined && card.keywordStart !== card.keywordEnd) {
-      const before = card.phrase.slice(0, card.keywordStart);
-      const kw = card.phrase.slice(card.keywordStart, card.keywordEnd);
-      const after = card.phrase.slice(card.keywordEnd);
-      setEditPt(escHtml(before) + "<b>" + escHtml(kw) + "</b>" + escHtml(after));
+    const existingSpans = getKeywordSpans(card);
+    if (card.phrase && existingSpans.length > 0) {
+      setEditPt(phraseToHtml(card.phrase, existingSpans, escHtml));
     } else {
       setEditPt(escHtml(card.word || ""));
     }
@@ -1963,16 +2076,19 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
   const saveEdit = () => {
     const ptHtml = ptRef.current ? ptRef.current.innerHTML : editPt;
     const enHtml = enRef.current ? enRef.current.innerHTML : editEn;
-    const { plain, kwStart, kwEnd, kwText } = parseHtmlBold(ptHtml);
+    const { plain, spans, kwTexts } = parseHtmlBold(ptHtml);
     const updated = {};
-    if (kwStart !== null && kwEnd !== null && kwText) {
+    if (spans.length > 0) {
       updated.phrase = plain;
-      updated.word = kwText;
-      updated.keywordStart = kwStart;
-      updated.keywordEnd = kwEnd;
+      updated.word = kwTexts.join(" | ");
+      updated.keywordSpans = spans;
+      // Keep legacy fields pointing at the first span for any code path that still reads them.
+      updated.keywordStart = spans[0][0];
+      updated.keywordEnd = spans[0][1];
     } else {
       updated.word = plain;
       updated.phrase = "";
+      updated.keywordSpans = [];
       updated.keywordStart = 0;
       updated.keywordEnd = 0;
     }
@@ -2009,26 +2125,89 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
   return (
     <div style={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(-16px)" : "translateY(0)", transition: "all 0.28s ease" }}>
       <div
-        onClick={() => { if (editing) return; if (answerMode === "type" && !hasRevealed) return; if (!flipped) { setFlipped(true); setHasRevealed(true); } else { setFlipped(false); } }}
+        onClick={() => {
+          if (editing) return;
+          if (answerMode === "type" && !hasRevealed) return;
+          // Only the very first reveal happens by clicking the card. After that,
+          // every flip — back or forward — must use the flip button (top-left).
+          if (!hasRevealed) { setFlipped(true); setHasRevealed(true); }
+        }}
         style={{
           position: "relative",
           background: T.bgCard,
           border: `1px solid ${T.border}`,
           borderRadius: T.radius,
-          padding: mobile ? "36px 20px" : "56px 40px",
+          padding: mobile ? "40px 24px 32px" : "56px 40px",
           cursor: editing ? "default" : (answerMode === "type" && !hasRevealed) ? "default" : "pointer",
-          minHeight: mobile ? 180 : 240,
+          minHeight: mobile ? 520 : 420,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           textAlign: "center",
-          boxShadow: T.shadowLg,
           transition: "all 0.3s",
         }}
         onMouseEnter={(e) => { if (!editing) e.currentTarget.style.borderColor = T.borderStrong; }}
         onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
       >
+        {!editing && !hasRevealed && setAnswerMode && !mobile && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute", top: 12, left: 12,
+              display: "inline-flex", background: T.bgInput, borderRadius: T.radiusSm, padding: 3,
+            }}
+          >
+            {[
+              { id: "type", label: t.modeType },
+              { id: "write", label: t.modeWrite },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                onClick={(e) => { e.stopPropagation(); setAnswerMode(opt.id); }}
+                style={{
+                  padding: "5px 14px",
+                  background: answerMode === opt.id ? T.bgCard : "transparent",
+                  border: "none",
+                  borderRadius: 10,
+                  fontFamily: font.mono,
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: answerMode === opt.id ? T.text : T.textTertiary,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  letterSpacing: 0.5,
+                }}
+                onMouseEnter={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
+                onMouseLeave={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = "transparent"; }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {!editing && hasRevealed && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setFlipped((f) => !f); }}
+            aria-label="Flip card"
+            title="Flip card"
+            style={{
+              position: "absolute", top: mobile ? 10 : 14, left: mobile ? 10 : 14,
+              background: "transparent", border: "none", cursor: "pointer",
+              padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+              <path d="M21 3v5h-5"/>
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+              <path d="M3 21v-5h5"/>
+            </svg>
+          </button>
+        )}
         {!editing && onSuspend && (
           <button
             onClick={(e) => { e.stopPropagation(); onSuspend(card.id); }}
@@ -2132,7 +2311,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                 <>
                   {card.phrase ? (
                     <div style={{ maxWidth: mobile ? "100%" : 760 }}>
-                      <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
+                      <PhraseDisplay phrase={card.phrase} spans={card.keywordSpans} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
                     </div>
                   ) : (
                     <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
@@ -2167,7 +2346,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                     autoFocus
                     style={{
                       width: "100%", padding: "12px 16px", boxSizing: "border-box",
-                      background: T.bgInput, border: `1px solid ${T.border}`,
+                      background: T.accentSoft, border: `1px solid ${T.border}`,
                       borderRadius: T.radiusSm, color: T.text,
                       fontFamily: font.body, fontSize: 16, outline: "none",
                       transition: "border-color 0.2s",
@@ -2202,7 +2381,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                 <>
                   {card.phrase ? (
                     <div style={{ maxWidth: mobile ? "100%" : 760 }}>
-                      <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
+                      <PhraseDisplay phrase={card.phrase} spans={card.keywordSpans} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
                     </div>
                   ) : (
                     <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
@@ -2241,11 +2420,6 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
             </div>
           )}
           <DrawingCanvas ref={drawRef} height={mobile ? 160 : 200} />
-          {!hasRevealed && (
-            <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 12, letterSpacing: 0.5, textAlign: "center" }}>
-              {t.writeHint}
-            </div>
-          )}
         </div>
       )}
       {hasRevealed && !editing && score !== null && (
@@ -2287,15 +2461,14 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                 border: `1px solid ${T.border}`,
                 borderRadius: T.radiusSm,
                 cursor: "pointer",
-                boxShadow: T.shadow,
                 transition: "all 0.15s",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 gap: 6,
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.transform = "translateY(-1px)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.transform = "translateY(0)"; }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
             >
               <span style={{ fontSize: 22 }}>{btn.emoji}</span>
               <span style={{ fontFamily: font.body, fontSize: 11, fontWeight: 500, color: T.textSecondary, lineHeight: 1.2, textAlign: "center" }}>
@@ -2332,11 +2505,9 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
   const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const toEnHtml = () => escHtml(card.translation || "");
   const toPtHtml = () => {
-    if (card.phrase && card.keywordStart !== undefined && card.keywordEnd !== undefined && card.keywordStart !== card.keywordEnd) {
-      const before = card.phrase.slice(0, card.keywordStart);
-      const kw = card.phrase.slice(card.keywordStart, card.keywordEnd);
-      const after = card.phrase.slice(card.keywordEnd);
-      return escHtml(before) + "<b>" + escHtml(kw) + "</b>" + escHtml(after);
+    const existingSpans = getKeywordSpans(card);
+    if (card.phrase && existingSpans.length > 0) {
+      return phraseToHtml(card.phrase, existingSpans, escHtml);
     }
     return escHtml(card.word || "");
   };
@@ -2349,20 +2520,23 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
     }
   };
   const commitPt = (html) => {
-    const { plain, kwStart, kwEnd, kwText } = parseHtmlBold(html);
+    const { plain, spans, kwTexts } = parseHtmlBold(html);
     const updated = { ...card };
-    if (kwStart !== null && kwEnd !== null && kwText) {
+    if (spans.length > 0) {
       updated.phrase = plain;
-      updated.word = kwText;
-      updated.keywordStart = kwStart;
-      updated.keywordEnd = kwEnd;
+      updated.word = kwTexts.join(" | ");
+      updated.keywordSpans = spans;
+      updated.keywordStart = spans[0][0];
+      updated.keywordEnd = spans[0][1];
     } else {
       updated.word = plain;
       updated.phrase = "";
+      updated.keywordSpans = [];
       updated.keywordStart = 0;
       updated.keywordEnd = 0;
     }
-    if (updated.word !== card.word || updated.phrase !== card.phrase || updated.translation !== card.translation) {
+    if (updated.word !== card.word || updated.phrase !== card.phrase || updated.translation !== card.translation ||
+        JSON.stringify(updated.keywordSpans) !== JSON.stringify(card.keywordSpans)) {
       onUpdate(card.id, updated);
     }
   };
@@ -2395,7 +2569,14 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-          <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, wordBreak: "break-word" }}>{card.word}</span>
+          <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, wordBreak: "break-word" }}>
+            {(card.word || "").split(/\s*\|\s*/).map((p, i, arr) => (
+              <Fragment key={i}>
+                {i > 0 && <span style={{ color: T.textTertiary, fontWeight: 400 }}> | </span>}
+                {p}
+              </Fragment>
+            ))}
+          </span>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             {(() => {
               const stage = getStage(card);
@@ -2506,7 +2687,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
         </div>
         {card.phrase && (
           <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, wordBreak: "break-word" }}>
-            <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="small" />
+            <PhraseDisplay phrase={card.phrase} spans={card.keywordSpans} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="small" />
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
@@ -2547,7 +2728,14 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
       onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
       onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; setMenuOpen(false); }}
     >
-      <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, padding: "6px 0", wordBreak: "break-word" }}>{card.word}</span>
+      <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, padding: "6px 0", wordBreak: "break-word" }}>
+        {(card.word || "").split(/\s*\|\s*/).map((p, i, arr) => (
+          <Fragment key={i}>
+            {i > 0 && <span style={{ color: T.textTertiary, fontWeight: 400 }}> | </span>}
+            {p}
+          </Fragment>
+        ))}
+      </span>
       <EditableCell html={toEnHtml()} onCommit={commitEn} style={cellStyle} />
       <EditableCell html={toPtHtml()} onCommit={commitPt} style={cellStyle} />
       {(() => {
@@ -3245,8 +3433,21 @@ const mergeCards = (localCards, remoteCards, localDeleted, remoteDeleted) => {
   // Index all cards by ID, keep newer version
   for (const c of localCards) merged[c.id] = c;
   for (const c of remoteCards) {
-    if (!merged[c.id] || (c.modifiedAt || 0) > (merged[c.id].modifiedAt || 0)) {
+    const existing = merged[c.id];
+    if (!existing) {
       merged[c.id] = c;
+    } else if ((c.modifiedAt || 0) > (existing.modifiedAt || 0)) {
+      // Remote wins — but preserve local-only fields that remote dropped
+      // (e.g. keywordSpans, which the Apps Script proxy may not persist as a column).
+      // We never want a sync round-trip to erase formatting the user added locally.
+      const preserved = {};
+      if (Array.isArray(existing.keywordSpans) && existing.keywordSpans.length > 0 &&
+          (!Array.isArray(c.keywordSpans) || c.keywordSpans.length === 0)) {
+        preserved.keywordSpans = existing.keywordSpans;
+      }
+      if (existing.firstReviewedAt && !c.firstReviewedAt) preserved.firstReviewedAt = existing.firstReviewedAt;
+      if (existing.firstReview && !c.firstReview) preserved.firstReview = existing.firstReview;
+      merged[c.id] = { ...c, ...preserved };
     }
   }
   // Apply deletions: delete if tombstone is newer than card
@@ -3859,7 +4060,14 @@ export default function VocabApp() {
   }, [heartbeat, persistActiveSession]);
   const newCardsIntroducedToday = useMemo(() => {
     const t = today();
-    return cards.filter((c) => c.firstReviewedAt === t).length;
+    // Count only cards genuinely introduced today: firstReviewedAt is today AND
+    // the card hasn't graduated past the initial step (reps ≤ 1). This filters
+    // out historical cards that got firstReviewedAt set in error by an earlier bug.
+    return cards.filter((c) =>
+      c.firstReviewedAt === t &&
+      c.lastReview === t &&
+      (c.reps || 0) <= 1
+    ).length;
   }, [cards, tick]);
   const dueCards = useMemo(() => {
     const due = cards.filter((c) => !c.suspended && c.dueDate <= today() && !skippedIds.has(c.id) && (!c.dueAfter || Date.now() >= c.dueAfter));
@@ -3932,8 +4140,17 @@ export default function VocabApp() {
       (c.word || "").toLowerCase().includes(q) || (c.translation || "").toLowerCase().includes(q) || (c.phrase || "").toLowerCase().includes(q)
     );
   }, [sortedCards, searchQuery]);
-  const dueReview = useMemo(() => dueCards.filter(c => c.reps > 0).length, [dueCards]);
-  const dueNew = useMemo(() => dueCards.filter(c => c.reps === 0).length, [dueCards]);
+  // D counts cards you've already studied at least once (graduated reviews + cards
+  // introduced today that are in their 10-min learning step). N counts only brand-new,
+  // never-touched cards — once a card has firstReviewedAt set, it moves from N → D.
+  const dueReview = useMemo(
+    () => dueCards.filter(c => (c.reps || 0) > 0 || ((c.reps || 0) === 0 && c.firstReviewedAt)).length,
+    [dueCards]
+  );
+  const dueNew = useMemo(
+    () => dueCards.filter(c => (c.reps || 0) === 0 && !c.firstReviewedAt).length,
+    [dueCards]
+  );
   if (!loaded) {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -3949,6 +4166,104 @@ export default function VocabApp() {
     { id: "heatmap", label: t.progress },
   ];
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
+  // Action buttons (timer, sync, settings) — same JSX rendered in two places:
+  // alongside the h1 header on mobile, alongside the tab nav on desktop.
+  const headerActions = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <button
+        onClick={activeSession ? stopTimer : startTimer}
+        title={activeSession ? t.stopTimer : t.startTimer}
+        style={activeSession ? {
+          display: "flex", alignItems: "center", gap: 7,
+          padding: "0 12px", height: 34, borderRadius: 9999,
+          background: T.dangerBg,
+          border: `1px solid rgba(196,72,62,0.2)`,
+          cursor: "pointer", transition: "all 0.2s",
+          fontFamily: font.mono,
+          fontSize: mobile ? 10 : 11,
+          color: T.danger,
+          fontVariantNumeric: "tabular-nums",
+          letterSpacing: 0.3,
+        } : {
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 34, height: 34, borderRadius: 9999,
+          background: T.accentSoft,
+          border: `1px solid ${T.border}`,
+          cursor: "pointer", transition: "all 0.2s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+      >
+        {activeSession ? (
+          <>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
+              <rect x="6" y="6" width="12" height="12" rx="1.5" />
+            </svg>
+            <span>{formatDuration(liveElapsed)}</span>
+          </>
+        ) : (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill={T.textTertiary} stroke="none" aria-hidden>
+            <polygon points="7,5 19,12 7,19" />
+          </svg>
+        )}
+      </button>
+      <button
+        onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
+        disabled={syncStatus === "syncing"}
+        title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
+        style={{
+          display: "flex", alignItems: "center", gap: 7,
+          padding: "0 12px", height: 34, borderRadius: 9999,
+          background: syncStatus === "synced" ? T.keywordBg : syncStatus === "error" ? T.dangerBg : T.accentSoft,
+          border: `1px solid ${syncStatus === "synced" ? "rgba(45,106,79,0.2)" : syncStatus === "error" ? "rgba(196,72,62,0.2)" : T.border}`,
+          cursor: syncStatus === "syncing" ? "default" : "pointer",
+          transition: "all 0.2s",
+        }}
+        onMouseEnter={(e) => { if (syncStatus !== "syncing") e.currentTarget.style.opacity = "0.8"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+      >
+        {syncStatus === "syncing" ? (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+            <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+            <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+          </svg>
+        ) : syncStatus === "synced" ? (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.success} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        ) : syncStatus === "error" ? (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="2.5" strokeLinecap="round">
+            <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            <circle cx="12" cy="12" r="10"/>
+          </svg>
+        ) : (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2.5" strokeLinecap="round">
+            <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+            <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+          </svg>
+        )}
+        <span style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: 0.3, color: syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textTertiary }}>
+          {syncStatus === "syncing" ? t.sheetsSyncing : syncStatus === "synced" ? (lastSynced || t.sheetsSynced) : syncStatus === "error" ? t.sheetsError : "sync"}
+        </span>
+      </button>
+      <button
+        onClick={() => setShowSettingsModal(true)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 34, height: 34, borderRadius: 9999,
+          background: T.accentSoft,
+          border: `1px solid ${T.border}`,
+          cursor: "pointer", transition: "all 0.2s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  );
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.text }}>
       <style>{`
@@ -3969,102 +4284,10 @@ export default function VocabApp() {
           <h1 style={{ fontFamily: font.display, fontSize: 28, fontWeight: 700, color: T.text, margin: 0, letterSpacing: -0.5, textTransform: "capitalize" }}>
             vocabulário
           </h1>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            onClick={activeSession ? stopTimer : startTimer}
-            title={activeSession ? t.stopTimer : t.startTimer}
-            style={activeSession ? {
-              display: "flex", alignItems: "center", gap: 7,
-              padding: "0 12px", height: 34, borderRadius: 9999,
-              background: T.dangerBg,
-              border: `1px solid rgba(196,72,62,0.2)`,
-              cursor: "pointer", transition: "all 0.2s",
-              fontFamily: font.mono,
-              fontSize: mobile ? 10 : 11,
-              color: T.danger,
-              fontVariantNumeric: "tabular-nums",
-              letterSpacing: 0.3,
-            } : {
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 34, height: 34, borderRadius: 9999,
-              background: T.accentSoft,
-              border: `1px solid ${T.border}`,
-              cursor: "pointer", transition: "all 0.2s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-          >
-            {activeSession ? (
-              <>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
-                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
-                </svg>
-                <span>{formatDuration(liveElapsed)}</span>
-              </>
-            ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill={T.textTertiary} stroke="none" aria-hidden>
-                <polygon points="7,5 19,12 7,19" />
-              </svg>
-            )}
-          </button>
-          <button
-            onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
-            disabled={syncStatus === "syncing"}
-            title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
-            style={{
-              display: "flex", alignItems: "center", gap: 7,
-              padding: "0 12px", height: 34, borderRadius: 9999,
-              background: syncStatus === "synced" ? T.keywordBg : syncStatus === "error" ? T.dangerBg : T.accentSoft,
-              border: `1px solid ${syncStatus === "synced" ? "rgba(45,106,79,0.2)" : syncStatus === "error" ? "rgba(196,72,62,0.2)" : T.border}`,
-              cursor: syncStatus === "syncing" ? "default" : "pointer",
-              transition: "all 0.2s",
-            }}
-            onMouseEnter={(e) => { if (syncStatus !== "syncing") e.currentTarget.style.opacity = "0.8"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-          >
-            {syncStatus === "syncing" ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
-                <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-                <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-              </svg>
-            ) : syncStatus === "synced" ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.success} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-            ) : syncStatus === "error" ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="2.5" strokeLinecap="round">
-                <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                <circle cx="12" cy="12" r="10"/>
-              </svg>
-            ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2.5" strokeLinecap="round">
-                <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-                <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-              </svg>
-            )}
-            <span style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: 0.3, color: syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textTertiary }}>
-              {syncStatus === "syncing" ? t.sheetsSyncing : syncStatus === "synced" ? (lastSynced || t.sheetsSynced) : syncStatus === "error" ? t.sheetsError : "sync"}
-            </span>
-          </button>
-          <button
-            onClick={() => setShowSettingsModal(true)}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 34, height: 34, borderRadius: 9999,
-              background: T.accentSoft,
-              border: `1px solid ${T.border}`,
-              cursor: "pointer", transition: "all 0.2s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </button>
-          </div>
+          {mobile && headerActions}
         </div>
-        <div className="nav-scroll" style={{ display: mobile ? "none" : "flex", gap: 0, borderBottom: `1px solid ${T.border}`, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, borderBottom: `1px solid ${T.border}` }}>
+        <div className="nav-scroll" style={{ display: mobile ? "none" : "flex", gap: 0, overflowX: "auto", WebkitOverflowScrolling: "touch", flex: 1, minWidth: 0 }}>
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -4105,6 +4328,12 @@ export default function VocabApp() {
             </button>
           ))}
         </div>
+        {!mobile && (
+          <div style={{ paddingBottom: 8 }}>
+            {headerActions}
+          </div>
+        )}
+        </div>
       </div>
       <div style={{ padding: mobile ? "20px 16px 100px" : "32px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
         {view === "practice" && (
@@ -4140,68 +4369,8 @@ export default function VocabApp() {
               </div>
             ) : (
               <>
-                <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                  <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
-                    {[
-                      { id: "en-pt", label: t.enToPt },
-                      { id: "pt-en", label: t.ptToEn },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        onClick={() => setStudyDirection(opt.id)}
-                        style={{
-                          padding: "6px 16px",
-                          background: studyDirection === opt.id ? T.bgCard : "transparent",
-                          border: "none",
-                          borderRadius: 9999,
-                          fontFamily: font.mono,
-                          fontSize: 12,
-                          fontWeight: 500,
-                          color: studyDirection === opt.id ? T.text : T.textTertiary,
-                          cursor: "pointer",
-                          transition: "all 0.15s",
-                          boxShadow: studyDirection === opt.id ? T.shadow : "none",
-                          letterSpacing: 0.5,
-                        }}
-                        onMouseEnter={(e) => { if (studyDirection !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
-                        onMouseLeave={(e) => { if (studyDirection !== opt.id) e.currentTarget.style.background = "transparent"; }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
-                    {[
-                      { id: "type", label: t.modeType },
-                      { id: "write", label: t.modeWrite },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        onClick={() => setAnswerMode(opt.id)}
-                        style={{
-                          padding: "6px 16px",
-                          background: answerMode === opt.id ? T.bgCard : "transparent",
-                          border: "none",
-                          borderRadius: 9999,
-                          fontFamily: font.mono,
-                          fontSize: 12,
-                          fontWeight: 500,
-                          color: answerMode === opt.id ? T.text : T.textTertiary,
-                          cursor: "pointer",
-                          transition: "all 0.15s",
-                          boxShadow: answerMode === opt.id ? T.shadow : "none",
-                          letterSpacing: 0.5,
-                        }}
-                        onMouseEnter={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
-                        onMouseLeave={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = "transparent"; }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} />
-                {(dueReview > 0 || dueNew > 0) && (
+                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} setAnswerMode={setAnswerMode} />
+                {mobile && (dueReview > 0 || dueNew > 0) && (
                   <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
                     <span style={{
                       fontFamily: font.mono, fontSize: 11, fontWeight: 600,
@@ -4289,7 +4458,7 @@ export default function VocabApp() {
                 nenhuma palavra adicionada ainda
               </div>
             ) : (
-              <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard, boxShadow: mobile ? "none" : T.shadow }}>
+              <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard }}>
                 <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 2fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
                   {[
                     { key: null, label: t.headerPalavra },
@@ -4476,7 +4645,7 @@ export default function VocabApp() {
                   return formatDuration(totalSec, { short: true });
                 })() },
               ].map((stat, i) => (
-                <div key={i} style={{ position: "relative", background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "14px 8px" : "22px 16px", textAlign: "center", boxShadow: T.shadow }}>
+                <div key={i} style={{ position: "relative", background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "14px 8px" : "22px 16px", textAlign: "center" }}>
                   {stat.editable && (
                     <button
                       onClick={() => setShowStudyTimeEditModal(true)}
@@ -4510,14 +4679,13 @@ export default function VocabApp() {
               const yUnit = (studyTimePeriod === "month" || studyTimePeriod === "year") ? "h" : "m";
               const hasAny = data.some((d) => d.seconds > 0);
               return (
-                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 8px" : "22px 24px 14px", boxShadow: T.shadow, marginBottom: 14 }}>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 8px" : "22px 24px 14px", marginBottom: 14 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
                     <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text }}>
                       {t.studyTimeReport}
                     </div>
-                    <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
+                    <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: T.radiusSm, padding: 3 }}>
                       {[
-                        { id: "day", label: t.periodDay },
                         { id: "week", label: t.periodWeek },
                         { id: "month", label: t.periodMonth },
                         { id: "year", label: t.periodYear },
@@ -4528,12 +4696,12 @@ export default function VocabApp() {
                           style={{
                             padding: "5px 14px",
                             background: studyTimePeriod === opt.id ? T.bgCard : "transparent",
-                            border: "none", borderRadius: 9999,
+                            border: "none", borderRadius: 10,
                             fontFamily: font.mono, fontSize: 11, fontWeight: 500,
                             color: studyTimePeriod === opt.id ? T.text : T.textTertiary,
                             cursor: "pointer", transition: "all 0.15s",
                             boxShadow: studyTimePeriod === opt.id ? T.shadow : "none",
-                            letterSpacing: 0.5, textTransform: "lowercase",
+                            letterSpacing: 0.5,
                           }}
                           onMouseEnter={(e) => { if (studyTimePeriod !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
                           onMouseLeave={(e) => { if (studyTimePeriod !== opt.id) e.currentTarget.style.background = "transparent"; }}
@@ -4575,7 +4743,7 @@ export default function VocabApp() {
                 </div>
               );
             })()}
-            <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 12 : 28, boxShadow: T.shadow, overflowX: "auto", marginBottom: 14 }}>
+            <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 12 : 28, overflowX: "auto", marginBottom: 14 }}>
               <CalendarHeatmap practiceDays={practiceDays} year={heatmapYear} onYearChange={setHeatmapYear} />
             </div>
             {cards.length > 0 && (() => {
@@ -4618,7 +4786,7 @@ export default function VocabApp() {
               const recallChartData = recallBands.filter(b => b.count > 0).map(b => ({ name: b.label, value: b.count, fill: b.color }));
               return (
                 <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "1fr 1fr", gap: 14, marginBottom: 14 }}>
-                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 24px" : 28, boxShadow: T.shadow }}>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 24px" : 28 }}>
                   <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
                     {t.stageBreakdown}
                   </div>
@@ -4704,7 +4872,7 @@ export default function VocabApp() {
                     </div>
                   </div>
                 </div>
-                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 24px" : 28, boxShadow: T.shadow }}>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 24px" : 28 }}>
                   <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
                     {t.recallRate}
                   </div>
@@ -4826,7 +4994,7 @@ export default function VocabApp() {
                         {t.studyActivityDesc}
                       </div>
                     </div>
-                    <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
+                    <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: T.radiusSm, padding: 3 }}>
                       {[
                         { id: "week", label: t.periodWeek },
                         { id: "month", label: t.periodMonth },
@@ -4838,12 +5006,12 @@ export default function VocabApp() {
                           style={{
                             padding: "5px 14px",
                             background: activityRange === opt.id ? T.bgCard : "transparent",
-                            border: "none", borderRadius: 9999,
+                            border: "none", borderRadius: 10,
                             fontFamily: font.mono, fontSize: 11, fontWeight: 500,
                             color: activityRange === opt.id ? T.text : T.textTertiary,
                             cursor: "pointer", transition: "all 0.15s",
                             boxShadow: activityRange === opt.id ? T.shadow : "none",
-                            letterSpacing: 0.5, textTransform: "lowercase",
+                            letterSpacing: 0.5,
                           }}
                           onMouseEnter={(e) => { if (activityRange !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
                           onMouseLeave={(e) => { if (activityRange !== opt.id) e.currentTarget.style.background = "transparent"; }}
