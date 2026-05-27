@@ -95,15 +95,37 @@ const FSRS = {
     reps: 0,
     dueDate: localDateStr(),
     lastReview: null,
+    firstReviewedAt: null,
+    learningStep: 0,
+    priority: false,
+    suspended: false,
     created: localDateStr(),
     modifiedAt: Date.now(),
     suspended: false,
   }),
   // Review a card with a grade (1=Forgot, 2=Hard, 3=Good, 4=Easy)
   review: (card, grade) => {
-    let { stability: s, difficulty: d, reps } = card;
+    const reps = card.reps || 0;
+    const inLearning = reps === 0;
+    // Learning step: brand-new cards (or cards being relearned at reps=0) get one
+    // re-exposure in the same session before they graduate to FSRS scheduling.
+    // First click "Good/Easy/Hard" → 10min step. "Forgot" → restart the step.
+    // Second click (any non-Forgot) → graduate via the FSRS path below.
+    if (inLearning && (grade === 1 || (card.learningStep || 0) === 0)) {
+      return {
+        ...card,
+        dueDate: localDateStr(),
+        dueAfter: Date.now() + 10 * 60 * 1000,
+        lastReview: localDateStr(),
+        firstReviewedAt: card.firstReviewedAt || localDateStr(),
+        learningStep: 1,
+        priority: false,
+        modifiedAt: Date.now(),
+      };
+    }
+    let { stability: s, difficulty: d } = card;
     if (reps === 0) {
-      // First review: initialize S and D from the grade
+      // First graduating review: initialize S and D from the grade
       s = FSRS.s0(grade);
       d = FSRS.d0(grade);
     } else {
@@ -119,8 +141,12 @@ const FSRS = {
       s = FSRS.stability(d, s, r, grade);
       d = FSRS.difficulty(d, grade);
     }
-    // Calculate next interval from new stability
-    const interval = FSRS.interval(s);
+    // Calculate next interval from new stability, with ±5% fuzz for intervals ≥ 3 days
+    let interval = FSRS.interval(s);
+    if (interval >= 3) {
+      const fuzz = 1 + (Math.random() - 0.5) * 0.1;
+      interval = Math.max(1, Math.min(MAX_INTERVAL, Math.round(interval * fuzz)));
+    }
     const due = new Date();
     due.setDate(due.getDate() + interval);
     // Forgot cards reappear after 10 minutes instead of tomorrow
@@ -133,6 +159,12 @@ const FSRS = {
       dueDate: grade === 1 ? localDateStr() : localDateStr(due),
       dueAfter,
       lastReview: localDateStr(),
+      // Mark when this card was first reviewed — used for the daily new-card cap
+      firstReviewedAt: card.firstReviewedAt || localDateStr(),
+      // Clear the "study next" priority flag once the card has been introduced
+      priority: false,
+      // Reset learning step now that we've graduated
+      learningStep: 0,
       modifiedAt: Date.now(),
     };
   },
@@ -140,9 +172,14 @@ const FSRS = {
 // ─── FSRS Preview Intervals ───
 const previewIntervals = (card) => {
   const grades = [1, 2, 3, 4];
+  const reps = card.reps || 0;
+  // A new card not yet in its learning step → every non-Forgot grade leads to a
+  // 10-min re-exposure, not the FSRS interval.
+  const inLearningStart = reps === 0 && !(card.learningStep || 0);
   return grades.map((grade) => {
     if (grade === 1) return 0; // forgot = 10 min delay, not days
-    let { stability: s, difficulty: d, reps } = card;
+    if (inLearningStart) return 0; // first click goes to 10-min learning step
+    let { stability: s, difficulty: d } = card;
     if (reps === 0) {
       s = FSRS.s0(grade);
     } else {
@@ -808,6 +845,164 @@ const applyRemnoteDueDates = (cards) => {
 // ─── Date Helpers ───
 const localDateStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const today = () => localDateStr();
+// practiceDays entries can be either a legacy number (single-device) or an object
+// keyed by device ID (multi-device). Always read through totalForDay.
+const totalForDay = (entry) => {
+  if (typeof entry === "number") return entry;
+  if (entry && typeof entry === "object") {
+    let sum = 0;
+    for (const v of Object.values(entry)) sum += (typeof v === "number" ? v : 0);
+    return sum;
+  }
+  return 0;
+};
+// Stable per-device id, used to shard daily review counts so two devices can
+// study on the same day without one overwriting the other's count.
+const getDeviceId = () => {
+  try {
+    let id = localStorage.getItem("vocab-device-id");
+    if (!id) {
+      const rand = (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      id = `dev_${rand}`;
+      localStorage.setItem("vocab-device-id", id);
+    }
+    return id;
+  } catch {
+    return "dev_anon";
+  }
+};
+// ─── Study Timer Helpers ───
+const IDLE_CAP_MS = 2 * 60 * 60 * 1000; // 2-hour auto-stop after gap
+const HEARTBEAT_MS = 30 * 1000;
+const formatDuration = (totalSec, opts = {}) => {
+  const s = Math.max(0, Math.round(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (opts.short) {
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m`;
+    return `${sec}s`;
+  }
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+};
+// Compact "Xh Ym" / "Xh" / "Ym" / "0m" for editable inputs
+const formatTimeInput = (totalSec) => {
+  const s = Math.max(0, Math.round(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.round((s % 3600) / 60);
+  if (h === 0 && m === 0) return "0m";
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+};
+// Parse "1h 30m", "1h30m", "90m", "1.5h", "90" -> seconds. null = invalid.
+const parseTimeInput = (raw) => {
+  if (typeof raw !== "string") return null;
+  const str = raw.trim().toLowerCase().replace(/\s+/g, "");
+  if (!str) return 0;
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    return Math.round(parseFloat(str) * 60);
+  }
+  let hours = 0;
+  let mins = 0;
+  let matched = false;
+  const hMatch = str.match(/(\d+(?:\.\d+)?)h/);
+  const mMatch = str.match(/(\d+(?:\.\d+)?)m/);
+  if (hMatch) { hours = parseFloat(hMatch[1]); matched = true; }
+  if (mMatch) { mins = parseFloat(mMatch[1]); matched = true; }
+  if (!matched) return null;
+  return Math.round(hours * 3600 + mins * 60);
+};
+// Manual locale-safe short date: "Tue, 26 May" or "Tue, 26 May 2024"
+const formatLogDate = (dateStr, lang) => {
+  const d = new Date(dateStr + "T12:00:00");
+  if (isNaN(d.getTime())) return dateStr;
+  const enDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const enMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const ptDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  const ptMonths = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  const useEN = lang === "en";
+  const dayName = (useEN ? enDays : ptDays)[d.getDay()];
+  const monthName = (useEN ? enMonths : ptMonths)[d.getMonth()];
+  const yearNow = new Date().getFullYear();
+  const y = d.getFullYear();
+  const yearPart = y === yearNow ? "" : ` ${y}`;
+  return `${dayName}, ${d.getDate()} ${monthName}${yearPart}`;
+};
+const isoWeek = (d) => {
+  const t = new Date(d);
+  t.setHours(0, 0, 0, 0);
+  // Thursday in current week decides the year
+  t.setDate(t.getDate() + 3 - ((t.getDay() + 6) % 7));
+  const week1 = new Date(t.getFullYear(), 0, 4);
+  return {
+    year: t.getFullYear(),
+    week: 1 + Math.round(((t - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7),
+  };
+};
+const weekStartStr = (d) => {
+  const t = new Date(d);
+  t.setHours(0, 0, 0, 0);
+  const dow = (t.getDay() + 6) % 7; // 0 = Monday
+  t.setDate(t.getDate() - dow);
+  return localDateStr(t);
+};
+const aggregateStudyTime = (studyTime, period, range) => {
+  // returns [{ key, label, seconds, startDate }, ...] ordered chronologically
+  const now = new Date();
+  const buckets = new Map();
+  if (period === "day") {
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = localDateStr(d);
+      buckets.set(key, { key, label: `${d.getMonth() + 1}/${d.getDate()}`, seconds: 0, startDate: key });
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      if (buckets.has(date)) buckets.get(date).seconds += sec;
+    });
+  } else if (period === "week") {
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i * 7);
+      const key = weekStartStr(d);
+      if (!buckets.has(key)) {
+        const ws = new Date(key + "T12:00:00");
+        buckets.set(key, { key, label: `${ws.getMonth() + 1}/${ws.getDate()}`, seconds: 0, startDate: key });
+      }
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      const wk = weekStartStr(new Date(date + "T12:00:00"));
+      if (buckets.has(wk)) buckets.get(wk).seconds += sec;
+    });
+  } else if (period === "month") {
+    for (let i = range - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      buckets.set(key, { key, label: monthNames[d.getMonth()], seconds: 0, startDate: key + "-01" });
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      const k = date.slice(0, 7);
+      if (buckets.has(k)) buckets.get(k).seconds += sec;
+    });
+  } else if (period === "year") {
+    for (let i = range - 1; i >= 0; i--) {
+      const y = now.getFullYear() - i;
+      const key = String(y);
+      buckets.set(key, { key, label: key, seconds: 0, startDate: key + "-01-01" });
+    }
+    Object.entries(studyTime).forEach(([date, sec]) => {
+      const k = date.slice(0, 4);
+      if (buckets.has(k)) buckets.get(k).seconds += sec;
+    });
+  }
+  return Array.from(buckets.values());
+};
 const normalizeDate = (v) => {
   if (!v) return "";
   const s = String(v);
@@ -909,8 +1104,6 @@ const i18n = {
     addFirstWord: "adicionar primeira palavra",
     addWordsToStart: "adicione palavras para começar a praticar",
     nextReview: "próxima revisão",
-    tapToReveal: "toque para revelar",
-    modePassive: "Revelar",
     modeType: "Digitar",
     modeWrite: "Escrever",
     typeAnswerPt: "Digite em português...",
@@ -924,6 +1117,23 @@ const i18n = {
     suspend: "suspender",
     unsuspend: "reativar",
     suspended: "suspensas",
+    startTimer: "iniciar tempo",
+    stopTimer: "parar tempo",
+    timerRunning: "estudando",
+    timerAutoStopped: "tempo parado — você esteve ausente",
+    totalTime: "tempo total",
+    editTimeLogs: "editar registros de tempo",
+    editTimeLogsHint: "Aceita formatos como 30m, 1h, 1h 30m ou 90.",
+    noTimeLogs: "Nenhum registro de tempo ainda.",
+    minutesLabel: "min",
+    deleteEntry: "excluir",
+    studyTimeReport: "tempo de estudo",
+    periodDay: "dia",
+    periodWeek: "semana",
+    periodMonth: "mês",
+    periodYear: "ano",
+    exportStudyTime: "exportar tempo",
+    exportStudyTimeDesc: "Baixe seu tempo de estudo como CSV (uma linha por dia).",
     skip: "Pular",
     forgot: "Esqueci",
     partiallyRecalled: "Parcialmente",
@@ -935,6 +1145,12 @@ const i18n = {
     noWordsYet: "nenhuma palavra adicionada ainda",
     newCard: "Novo",
     today: "Hoje",
+    notAvailable: "N/D",
+    upNext: "próxima",
+    addPriority: "estudar em seguida",
+    removePriority: "remover prioridade",
+    newCardsPerDay: "Cartas novas por dia",
+    newCardsPerDayDesc: "Quantas cartas novas serão introduzidas em cada sessão.",
     deleteWord: "excluir palavra",
     importWords: "importar palavras",
     importDesc: "Importe suas palavras em massa usando um CSV ou texto colado. Use negrito para marcar a palavra-chave na frase.",
@@ -1017,28 +1233,34 @@ const i18n = {
     thisWeek: "Esta semana",
     thisMonth: "Este mês",
     thisYear: "Este ano",
-    chat: "conversar",
-    chatNoDue: "Nenhuma palavra para revisar hoje",
-    chatNoDueDesc: "Volte quando tiver palavras em dia para praticar conversando.",
-    chatNoKey: "Chave de API não configurada",
-    chatNoKeyDesc: "Adicione sua chave de API Gemini (Google) nos ajustes para usar o modo de conversa. É grátis em aistudio.google.com.",
-    chatGoToSettings: "Ir para ajustes",
-    chatReady: "Pronto para conversar",
-    chatReadyDesc: "A IA vai criar frases novas com as suas palavras do dia. Use as palavras naturalmente na conversa.",
-    chatStart: "Começar conversa",
-    chatInputPlaceholder: "Escreva sua resposta em português...",
-    chatSend: "Enviar",
-    chatWordsUsed: "palavras praticadas",
-    chatWordUsed: "palavra praticada",
-    chatNewSession: "Nova sessão",
-    chatThinking: "pensando...",
-    chatSessionTitle: "Sessão de conversa",
     apiKey: "Chave de API Gemini",
     apiKeyDesc: "Chave gratuita do Google AI Studio (aistudio.google.com). Armazenada só no seu dispositivo.",
     apiKeyPlaceholder: "AIza...",
     apiKeySaved: "Chave salva ✓",
     sheetsSync: "Sincronização Google Sheets",
     sheetsSyncDesc: "Mantenha seus cartões sincronizados em todos os dispositivos via Google Sheets. Cole a URL do Apps Script abaixo.",
+    sheetsSyncWarn: "⚠ Esta URL funciona como uma chave de acesso aos seus dados. Não compartilhe screenshots desta tela nem cole a URL em mensagens.",
+    backupSection: "Backup e restauração",
+    backupSectionDesc: "Baixe uma cópia completa dos seus dados ou restaure de um backup anterior.",
+    exportBackup: "Baixar backup",
+    importBackup: "Restaurar backup",
+    importBackupConfirm: "Importar este backup vai substituir todos os dados atuais. Continuar?",
+    importBackupSuccess: "Backup restaurado. Recarregando…",
+    importBackupInvalid: "Arquivo de backup inválido.",
+    restoreFromSnapshot: "Restaurar de snapshot",
+    snapshotPickerTitle: "Escolha um snapshot para restaurar",
+    snapshotPickerEmpty: "Nenhum snapshot disponível ainda.",
+    snapshotPickerError: "Não foi possível listar os snapshots.",
+    backupHealthTitle: "Estado do backup",
+    backupHealthLastSync: "Última sincronização",
+    backupHealthLastSnapshot: "Último snapshot automático",
+    backupHealthLastManual: "Último backup manual",
+    backupHealthTotalCards: "Total de cartas",
+    backupHealthNever: "nunca",
+    backupHealthJustNow: "agora",
+    backupHealthDaysAgo: "dias atrás",
+    backupHealthHoursAgo: "horas atrás",
+    backupHealthMinutesAgo: "minutos atrás",
     sheetsSave: "Salvar e sincronizar",
     sheetsSyncing: "sincronizando...",
     sheetsSynced: "Sincronizado ✓",
@@ -1059,8 +1281,6 @@ const i18n = {
     addFirstWord: "add your first word",
     addWordsToStart: "add words to start practising",
     nextReview: "next review",
-    tapToReveal: "tap to reveal",
-    modePassive: "Reveal",
     modeType: "Type",
     modeWrite: "Write",
     typeAnswerPt: "Type in Portuguese...",
@@ -1074,6 +1294,23 @@ const i18n = {
     suspend: "suspend",
     unsuspend: "unsuspend",
     suspended: "suspended",
+    startTimer: "start timer",
+    stopTimer: "stop timer",
+    timerRunning: "studying",
+    timerAutoStopped: "timer auto-stopped — you were away",
+    totalTime: "total time",
+    editTimeLogs: "edit time logs",
+    editTimeLogsHint: "Accepts formats like 30m, 1h, 1h 30m, or 90.",
+    noTimeLogs: "No time logs yet.",
+    minutesLabel: "min",
+    deleteEntry: "delete",
+    studyTimeReport: "study time",
+    periodDay: "day",
+    periodWeek: "week",
+    periodMonth: "month",
+    periodYear: "year",
+    exportStudyTime: "export time",
+    exportStudyTimeDesc: "Download your study time as CSV (one row per day).",
     skip: "Skip",
     forgot: "Forgot",
     partiallyRecalled: "Partially recalled",
@@ -1085,6 +1322,12 @@ const i18n = {
     noWordsYet: "no words added yet",
     newCard: "New",
     today: "Today",
+    notAvailable: "N/A",
+    upNext: "up next",
+    addPriority: "study next",
+    removePriority: "remove priority",
+    newCardsPerDay: "New cards per day",
+    newCardsPerDayDesc: "How many new cards are introduced in each study session.",
     deleteWord: "delete word",
     importWords: "import words",
     importDesc: "Import your words in bulk using a CSV or pasted text. Use bold to mark the keyword in the sentence.",
@@ -1167,28 +1410,34 @@ const i18n = {
     thisWeek: "This week",
     thisMonth: "This month",
     thisYear: "This year",
-    chat: "chat",
-    chatNoDue: "No words due today",
-    chatNoDueDesc: "Come back when you have words due to practise in conversation.",
-    chatNoKey: "API key not configured",
-    chatNoKeyDesc: "Add your Gemini API key (Google) in settings to use conversation mode. It's free at aistudio.google.com.",
-    chatGoToSettings: "Go to settings",
-    chatReady: "Ready to chat",
-    chatReadyDesc: "The AI will create new sentences using your due words. Use them naturally in the conversation.",
-    chatStart: "Start conversation",
-    chatInputPlaceholder: "Write your reply in Portuguese...",
-    chatSend: "Send",
-    chatWordsUsed: "words practised",
-    chatWordUsed: "word practised",
-    chatNewSession: "New session",
-    chatThinking: "thinking...",
-    chatSessionTitle: "Conversation session",
     apiKey: "Gemini API Key",
     apiKeyDesc: "Free key from Google AI Studio (aistudio.google.com). Stored only on your device.",
     apiKeyPlaceholder: "AIza...",
     apiKeySaved: "Key saved ✓",
     sheetsSync: "Google Sheets Sync",
     sheetsSyncDesc: "Keep your cards synced across all devices via Google Sheets. Paste your Apps Script URL below.",
+    sheetsSyncWarn: "⚠ This URL functions as the access key to your data. Don't share screenshots of this panel or paste the URL into chats.",
+    backupSection: "Backup & restore",
+    backupSectionDesc: "Download a full copy of your data or restore from a previous backup.",
+    exportBackup: "Download backup",
+    importBackup: "Restore backup",
+    importBackupConfirm: "Importing this backup will replace all current data. Continue?",
+    importBackupSuccess: "Backup restored. Reloading…",
+    importBackupInvalid: "Invalid backup file.",
+    restoreFromSnapshot: "Restore from snapshot",
+    snapshotPickerTitle: "Choose a snapshot to restore",
+    snapshotPickerEmpty: "No snapshots available yet.",
+    snapshotPickerError: "Couldn't list snapshots.",
+    backupHealthTitle: "Backup status",
+    backupHealthLastSync: "Last sync",
+    backupHealthLastSnapshot: "Last auto-snapshot",
+    backupHealthLastManual: "Last manual backup",
+    backupHealthTotalCards: "Total cards",
+    backupHealthNever: "never",
+    backupHealthJustNow: "just now",
+    backupHealthDaysAgo: "days ago",
+    backupHealthHoursAgo: "hours ago",
+    backupHealthMinutesAgo: "minutes ago",
     sheetsSave: "Save & sync",
     sheetsSyncing: "syncing...",
     sheetsSynced: "Synced ✓",
@@ -1206,7 +1455,7 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
   const [tooltip, setTooltip] = useState(null);
   const gridRef = useRef(null);
   const days = getDaysInYear(year);
-  const maxCount = Math.max(1, ...Object.values(practiceDays).filter(Boolean));
+  const maxCount = Math.max(1, ...Object.values(practiceDays).map(totalForDay).filter(Boolean));
   const weeks = [];
   let currentWeek = new Array(7).fill(null);
   const firstDay = getWeekday(days[0]);
@@ -1219,7 +1468,7 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
   if (currentWeek.some((d) => d !== null)) weeks.push(currentWeek);
   const getColor = (day) => {
     if (!day) return "transparent";
-    const count = practiceDays[day] || 0;
+    const count = totalForDay(practiceDays[day]);
     if (count === 0) return T.heatEmpty;
     if (count < 10) return T.heat1;
     if (count <= 30) return T.heat2;
@@ -1234,16 +1483,16 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
       if (m !== lastMonth) { monthPositions.push({ month: m, weekIndex: wi }); lastMonth = m; }
     }
   });
-  const totalDays = Object.values(practiceDays).filter((v) => v > 0).length;
+  const totalDays = Object.values(practiceDays).filter((v) => totalForDay(v) > 0).length;
   const currentStreak = (() => {
     let streak = 0;
     let d = new Date();
-    if (!practiceDays[localDateStr(d)] || practiceDays[localDateStr(d)] === 0) {
+    if (totalForDay(practiceDays[localDateStr(d)]) === 0) {
       d.setDate(d.getDate() - 1);
     }
     while (true) {
       const ds = localDateStr(d);
-      if (practiceDays[ds] && practiceDays[ds] > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
+      if (totalForDay(practiceDays[ds]) > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
     }
     return streak;
   })();
@@ -1310,11 +1559,11 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
                   paddingBottom: "100%",
                   borderRadius: 2,
                   background: getColor(day),
-                  cursor: day && (practiceDays[day] || 0) > 0 ? "pointer" : "default",
+                  cursor: day && totalForDay(practiceDays[day]) > 0 ? "pointer" : "default",
                 }}
                 onMouseEnter={(e) => {
                   if (!day) return;
-                  const count = practiceDays[day] || 0;
+                  const count = totalForDay(practiceDays[day]);
                   if (count === 0) return;
                   const rect = e.currentTarget.getBoundingClientRect();
                   setTooltip({
@@ -1643,7 +1892,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
         ref={canvasRef}
         style={{
           width: "100%", height, display: "block",
-          background: T.bgInput, borderRadius: T.radiusSm,
+          background: T.bgInput, borderRadius: T.radius,
           border: `1px solid ${T.border}`, touchAction: "none",
           cursor: "crosshair",
         }}
@@ -1668,7 +1917,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
   );
 }));
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode = "passive" }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode = "type" }) {
   const mobile = useIsMobile();
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -1943,10 +2192,6 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                     {t.check}
                   </button>
                 </div>
-              ) : answerMode !== "write" && !hasRevealed ? (
-                <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textPlaceholder, marginTop: 32, letterSpacing: 0.5 }}>
-                  {t.tapToReveal}
-                </div>
               ) : null}
             </div>
             <div ref={backRef} style={{ position: "absolute", top: 0, left: 0, right: 0, visibility: flipped ? "visible" : "hidden", pointerEvents: flipped ? "auto" : "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
@@ -2069,13 +2314,13 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
   );
 }
 // ─── Word Row ───
-const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSuspend, onUnsuspend }) {
+const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTogglePriority, onSuspend, onUnsuspend }) {
   const mobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const isOverdue = card.dueDate <= today();
   const daysUntil = Math.ceil((new Date(card.dueDate) - new Date(today())) / 86400000);
   const dueLabel = (() => {
-    if (card.reps === 0 || (isOverdue && daysUntil < 0)) return t.newCard;
+    if (card.reps === 0) return t.newCard;
     if (daysUntil === 0) return t.today;
     const d = new Date(card.dueDate + "T12:00:00");
     const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -2083,7 +2328,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
     const yyyy = d.getFullYear();
     return `${mm}/${dd}/${yyyy}`;
   })();
-  const isNew = card.reps === 0 || (isOverdue && daysUntil < 0);
+  const isNew = card.reps === 0;
   const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const toEnHtml = () => escHtml(card.translation || "");
   const toPtHtml = () => {
@@ -2144,8 +2389,9 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
           padding: "12px 16px",
           borderBottom: `1px solid ${T.border}`,
           position: "relative",
-          contentVisibility: "auto",
+          contentVisibility: menuOpen ? "visible" : "auto",
           containIntrinsicSize: "auto 80px",
+          zIndex: menuOpen ? 20 : "auto",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
@@ -2180,7 +2426,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
                 <div style={{
                   position: "absolute", right: 0, top: "100%", marginTop: 4, zIndex: 10,
                   background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-                  boxShadow: T.shadowLg, overflow: "hidden", minWidth: 150,
+                  boxShadow: T.shadowLg, overflow: "hidden", minWidth: 180, whiteSpace: "nowrap",
                 }}>
                   <button
                     onClick={() => { onSpeak(card.phrase || card.word); setMenuOpen(false); }}
@@ -2193,6 +2439,21 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
                     <SpeakerIcon size={14} color={T.textTertiary} />
                     {t.listenPronunciation}
                   </button>
+                  {isNew && onTogglePriority && (
+                    <button
+                      onClick={() => { onTogglePriority(card.id); setMenuOpen(false); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                        background: "none", border: "none", cursor: "pointer",
+                        fontFamily: font.body, fontSize: 13, color: T.textSecondary, textAlign: "left",
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                      </svg>
+                      {card.priority ? t.removePriority : t.addPriority}
+                    </button>
+                  )}
                   {card.suspended ? (
                     onUnsuspend && (
                       <button
@@ -2248,17 +2509,23 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
             <PhraseDisplay phrase={card.phrase} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="small" />
           </div>
         )}
-        {!isNew && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-            <span style={{
-              fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
-              background: isOverdue ? T.dangerBg : T.accentSoft,
-              color: isOverdue ? T.danger : T.textTertiary,
-            }}>
-              {dueLabel}
-            </span>
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+          {(() => {
+            const isDark = T.bg === "#0E0E0E";
+            const newSc = stageColors.new;
+            const showPriority = isNew && card.priority;
+            return (
+              <span style={{
+                fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
+                background: showPriority ? T.borderStrong : (isNew ? newSc.bg : (isOverdue ? T.dangerBg : T.accentSoft)),
+                color: showPriority ? T.text : (isNew ? (isDark ? newSc.darkText : newSc.text) : (isOverdue ? T.danger : T.textTertiary)),
+                fontWeight: 400,
+              }}>
+                {showPriority ? t.upNext : (isNew ? t.notAvailable : dueLabel)}
+              </span>
+            );
+          })()}
+        </div>
       </div>
     );
   }
@@ -2272,9 +2539,10 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
         padding: "10px 20px",
         borderBottom: `1px solid ${T.border}`,
         transition: "background 0.12s",
-        contentVisibility: "auto",
+        contentVisibility: menuOpen ? "visible" : "auto",
         containIntrinsicSize: "auto 48px",
         position: "relative",
+        zIndex: menuOpen ? 20 : "auto",
       }}
       onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
       onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; setMenuOpen(false); }}
@@ -2297,19 +2565,23 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
           </div>
         );
       })()}
-      {isNew ? (
-        <div />
-      ) : (
-        <div style={{ display: "flex", justifyContent: "flex-start", paddingTop: 4 }}>
-          <span style={{
-            fontFamily: font.mono, fontSize: 10, padding: "4px 10px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
-            background: isOverdue ? T.dangerBg : T.accentSoft,
-            color: isOverdue ? T.danger : T.textTertiary,
-          }}>
-            {dueLabel}
-          </span>
-        </div>
-      )}
+      <div style={{ display: "flex", justifyContent: "flex-start", paddingTop: 4 }}>
+        {(() => {
+          const isDark = T.bg === "#0E0E0E";
+          const newSc = stageColors.new;
+          const showPriority = isNew && card.priority;
+          return (
+            <span style={{
+              fontFamily: font.mono, fontSize: 10, padding: "4px 10px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
+              background: showPriority ? T.borderStrong : (isNew ? newSc.bg : (isOverdue ? T.dangerBg : T.accentSoft)),
+              color: showPriority ? T.text : (isNew ? (isDark ? newSc.darkText : newSc.text) : (isOverdue ? T.danger : T.textTertiary)),
+              fontWeight: 400,
+            }}>
+              {showPriority ? t.upNext : (isNew ? t.notAvailable : dueLabel)}
+            </span>
+          );
+        })()}
+      </div>
       <div style={{ position: "relative", paddingTop: 4 }}>
         <button
           onClick={() => setMenuOpen(!menuOpen)}
@@ -2329,7 +2601,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
           <div style={{
             position: "absolute", right: 0, top: "100%", marginTop: 4, zIndex: 10,
             background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-            boxShadow: T.shadowLg, overflow: "hidden", minWidth: 150,
+            boxShadow: T.shadowLg, overflow: "hidden", minWidth: 180, whiteSpace: "nowrap",
           }}>
             <button
               onClick={() => { onSpeak(card.phrase || card.word); setMenuOpen(false); }}
@@ -2345,6 +2617,24 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onSus
               <SpeakerIcon size={14} color={T.textTertiary} />
               {t.listenPronunciation}
             </button>
+            {isNew && onTogglePriority && (
+              <button
+                onClick={() => { onTogglePriority(card.id); setMenuOpen(false); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px",
+                  background: "none", border: "none", cursor: "pointer",
+                  fontFamily: font.body, fontSize: 13, color: T.textSecondary, textAlign: "left",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={card.priority ? T.accent : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+                {card.priority ? t.removePriority : t.addPriority}
+              </button>
+            )}
             {card.suspended ? (
               onUnsuspend && (
                 <button
@@ -2853,250 +3143,6 @@ function ImportPanel({ onImport, existingCount }) {
     </div>
   );
 }
-// ─── Chat / Conversar View ───
-function ChatView({ dueCards, settings, onReviewCard, onGoToSettings }) {
-  const apiKey = settings.apiKey || "";
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [started, setStarted] = useState(false);
-  const [wordsReviewed, setWordsReviewed] = useState(new Set());
-  const bottomRef = useRef(null);
-  const inputRef = useRef(null);
-  useEffect(() => {
-    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
-  const dueWordList = dueCards.map((c) => `${c.word} (${c.translation})`).join(", ");
-  const systemPrompt = `You are a warm and encouraging Portuguese (Brazilian) conversation partner. The learner has these vocabulary words due for review: ${dueWordList}.
-Your role:
-1. Create NEW example sentences (different from their flashcard phrases) naturally weaving in the due vocabulary words
-2. Hold a natural, engaging conversation in Portuguese — keep it casual and Paulistano in style
-3. When the learner correctly uses one of the due vocabulary words in their reply, acknowledge it naturally (e.g., "Isso! Você usou 'aconchegante' muito bem!")
-4. Gently correct errors without dwelling on them
-5. Keep your responses concise (2–4 sentences) — this is a chat, not a lecture
-6. When you detect a due vocabulary word used correctly by the learner, end your message with a JSON marker on its own line: WORD_USED:{"word":"palavra"} — this is parsed programmatically, keep it exact
-Start the conversation naturally in Portuguese, using one or two of the due words in a new context. Make it feel like a genuine conversation, not a language drill.`;
-  const sendToAPI = async (currentMessages, isFirst = false) => {
-    setLoading(true);
-    const contents = isFirst
-      ? [{ role: "user", parts: [{ text: "Oi! Estou pronto para praticar." }] }]
-      : currentMessages.map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        }));
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            generationConfig: { maxOutputTokens: 600, temperature: 0.9 },
-          }),
-        }
-      );
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `API error ${response.status}`);
-      }
-      const data = await response.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      const wordUsedMatch = rawText.match(/\nWORD_USED:\{"word":"(.+?)"\}/);
-      const wordUsed = wordUsedMatch ? wordUsedMatch[1] : null;
-      const cleanText = rawText.replace(/\nWORD_USED:\{.*?\}/g, "").trim();
-      const assistantMsg = { role: "assistant", content: cleanText };
-      const newMessages = isFirst
-        ? [assistantMsg]
-        : [...currentMessages, assistantMsg];
-      setMessages(newMessages);
-      if (wordUsed) {
-        const card = dueCards.find((c) => c.word.toLowerCase() === wordUsed.toLowerCase());
-        if (card && !wordsReviewed.has(card.id)) {
-          setWordsReviewed((prev) => new Set([...prev, card.id]));
-          onReviewCard(card.id, 3);
-        }
-      }
-    } catch (err) {
-      const errMsg = { role: "assistant", content: `⚠️ Erro: ${err.message}`, isError: true };
-      setMessages((prev) => [...prev, errMsg]);
-    }
-    setLoading(false);
-    setTimeout(() => inputRef.current?.focus(), 100);
-  };
-  if (!apiKey) {
-    return (
-      <div style={{ textAlign: "center", padding: "80px 20px" }}>
-        <div style={{ width: 48, height: 48, borderRadius: 24, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-        </div>
-        <div style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, color: T.text, marginBottom: 8 }}>{t.chatNoKey}</div>
-        <div style={{ fontFamily: font.body, fontSize: 14, color: T.textTertiary, marginBottom: 28, lineHeight: 1.6, maxWidth: 340, margin: "0 auto 28px" }}>{t.chatNoKeyDesc}</div>
-        <button onClick={onGoToSettings} style={{ padding: "11px 28px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3 }}>
-          {t.chatGoToSettings}
-        </button>
-      </div>
-    );
-  }
-  if (dueCards.length === 0) {
-    return (
-      <div style={{ textAlign: "center", padding: "80px 20px" }}>
-        <div style={{ width: 48, height: 48, borderRadius: 24, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
-        <div style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, color: T.text, marginBottom: 8, textTransform: "capitalize" }}>{t.chatNoDue}</div>
-        <div style={{ fontFamily: font.body, fontSize: 14, color: T.textTertiary, lineHeight: 1.6 }}>{t.chatNoDueDesc}</div>
-      </div>
-    );
-  }
-  if (!started) {
-    return (
-      <div style={{ textAlign: "center", padding: "80px 20px" }}>
-        <div style={{ width: 48, height: 48, borderRadius: 24, background: T.keywordBg, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.keyword} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-        </div>
-        <div style={{ fontFamily: font.display, fontSize: 22, fontWeight: 700, color: T.text, marginBottom: 8, textTransform: "capitalize" }}>{t.chatReady}</div>
-        <div style={{ fontFamily: font.body, fontSize: 14, color: T.textTertiary, marginBottom: 8, lineHeight: 1.6, maxWidth: 360, margin: "0 auto 8px" }}>{t.chatReadyDesc}</div>
-        <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary, marginBottom: 32 }}>
-          {dueCards.length} {dueCards.length === 1 ? t.word : t.wordsPlural} · {t.chatWordsUsed}: 0
-        </div>
-        <button
-          onClick={async () => {
-            setStarted(true);
-            await sendToAPI([], true);
-          }}
-          style={{ padding: "13px 36px", background: T.accent, border: "none", borderRadius: T.radiusSm, color: T.bg, fontFamily: font.body, fontSize: 14, fontWeight: 600, cursor: "pointer", letterSpacing: 0.3, transition: "all 0.15s" }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-        >
-          {t.chatStart}
-        </button>
-      </div>
-    );
-  }
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || loading) return;
-    setInput("");
-    const userMsg = { role: "user", content: text };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    await sendToAPI(newMessages);
-  };
-  const handleReset = () => {
-    setMessages([]);
-    setStarted(false);
-    setWordsReviewed(new Set());
-    setInput("");
-  };
-  return (
-    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 180px)", minHeight: 500 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.5 }}>
-          {t.chatSessionTitle}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {wordsReviewed.size > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, background: T.keywordBg, borderRadius: 20, padding: "4px 12px" }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.keyword} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              <span style={{ fontFamily: font.mono, fontSize: 11, color: T.keyword, fontWeight: 600 }}>
-                {wordsReviewed.size} {wordsReviewed.size === 1 ? t.chatWordUsed : t.chatWordsUsed}
-              </span>
-            </div>
-          )}
-          <button
-            onClick={handleReset}
-            style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: T.radiusSm, padding: "6px 14px", color: T.textTertiary, fontFamily: font.body, fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.color = T.text; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.color = T.textTertiary; }}
-          >
-            {t.chatNewSession}
-          </button>
-        </div>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingBottom: 8 }}>
-        {messages.map((msg, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-            <div style={{
-              maxWidth: "78%",
-              padding: "12px 16px",
-              borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-              background: msg.role === "user" ? T.accent : T.bgCard,
-              border: msg.role === "user" ? "none" : `1px solid ${T.border}`,
-              color: msg.role === "user" ? T.bg : (msg.isError ? T.danger : T.text),
-              fontFamily: font.body,
-              fontSize: 14,
-              lineHeight: 1.65,
-              boxShadow: T.shadow,
-            }}>
-              {msg.content}
-            </div>
-          </div>
-        ))}
-        {loading && (
-          <div style={{ display: "flex", justifyContent: "flex-start" }}>
-            <div style={{ padding: "12px 18px", borderRadius: "16px 16px 16px 4px", background: T.bgCard, border: `1px solid ${T.border}`, fontFamily: font.body, fontSize: 13, color: T.textTertiary, fontStyle: "italic", boxShadow: T.shadow }}>
-              {t.chatThinking}
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-      <div style={{ display: "flex", gap: 10, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
-        <input
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder={t.chatInputPlaceholder}
-          disabled={loading}
-          style={{
-            flex: 1,
-            padding: "13px 16px",
-            background: T.bgInput,
-            border: `1px solid transparent`,
-            borderRadius: T.radiusSm,
-            color: T.text,
-            fontFamily: font.body,
-            fontSize: 14,
-            outline: "none",
-            transition: "border-color 0.2s",
-            opacity: loading ? 0.6 : 1,
-          }}
-          onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
-          onBlur={(e) => { e.target.style.borderColor = "transparent"; }}
-        />
-        <button
-          onClick={handleSend}
-          disabled={loading || !input.trim()}
-          style={{
-            padding: "13px 22px",
-            background: !loading && input.trim() ? T.accent : T.bgInput,
-            border: "none",
-            borderRadius: T.radiusSm,
-            color: !loading && input.trim() ? T.bg : T.textPlaceholder,
-            fontFamily: font.body,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: !loading && input.trim() ? "pointer" : "default",
-            transition: "all 0.2s",
-            letterSpacing: 0.3,
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { if (!loading && input.trim()) e.currentTarget.style.opacity = "0.85"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-        >
-          {t.chatSend}
-        </button>
-      </div>
-    </div>
-  );
-}
 // ─── Google Sheets Sync (via Apps Script proxy) ───
 const GSheets = {
   // Read all cards from the sheet
@@ -3143,7 +3189,7 @@ const GSheets = {
   },
   // Write practice days + deleted cards metadata
   writeMeta: async (scriptUrl, practiceDays, deletedCards) => {
-    await fetch(scriptUrl, {
+    const res = await fetch(scriptUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify({
@@ -3151,7 +3197,42 @@ const GSheets = {
         practiceDays: JSON.stringify(practiceDays),
         deletedCards: JSON.stringify(deletedCards || {}),
       }),
-    }).catch(() => {});
+    });
+    if (!res.ok) throw new Error(`Sync meta-write failed: ${res.status}`);
+    try {
+      const data = await res.json();
+      if (data && data.error) throw new Error(data.error);
+    } catch (e) {
+      // Response wasn't JSON; if status was ok, treat as success
+      if (e.message && e.message.startsWith("Sync meta-write")) throw e;
+    }
+  },
+  // Snapshot — append a JSON snapshot row to the "Backups" tab
+  writeSnapshot: async (scriptUrl, snapshot) => {
+    const res = await fetch(scriptUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "writeSnapshot", snapshot }),
+    });
+    if (!res.ok) throw new Error(`Snapshot write failed: ${res.status}`);
+    const data = await res.json().catch(() => ({}));
+    if (data && data.error) throw new Error(data.error);
+  },
+  // List snapshots — returns [{ date, size }, ...] newest-first
+  listSnapshots: async (scriptUrl) => {
+    const res = await fetch(`${scriptUrl}?action=listSnapshots`);
+    if (!res.ok) throw new Error(`Snapshot list failed: ${res.status}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    return (data.snapshots || []).slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  },
+  // Read a single snapshot by date string
+  readSnapshot: async (scriptUrl, date) => {
+    const res = await fetch(`${scriptUrl}?action=readSnapshot&date=${encodeURIComponent(date)}`);
+    if (!res.ok) throw new Error(`Snapshot read failed: ${res.status}`);
+    const data = await res.json();
+    if (data && data.error) throw new Error(data.error);
+    return data.snapshot || null;
   },
 };
 // ─── Merge Logic ───
@@ -3177,17 +3258,32 @@ const mergeCards = (localCards, remoteCards, localDeleted, remoteDeleted) => {
       delete mergedDeleted[id];
     }
   }
-  // Prune tombstones older than 30 days
-  const cutoff = Date.now() - 30 * 86400000;
-  for (const [id, delTime] of Object.entries(mergedDeleted)) {
-    if (delTime < cutoff) delete mergedDeleted[id];
-  }
+  // Tombstones are kept forever (one numeric per delete, negligible size; guarantees
+  // delete propagation even on devices offline for months).
   return { cards: Object.values(merged), deleted: mergedDeleted };
 };
 const mergePracticeDays = (local, remote) => {
-  const merged = { ...local };
-  for (const [day, count] of Object.entries(remote || {})) {
-    merged[day] = Math.max(merged[day] || 0, count);
+  const merged = {};
+  const allDays = new Set([
+    ...Object.keys(local || {}),
+    ...Object.keys(remote || {}),
+  ]);
+  for (const day of allDays) {
+    const l = (local || {})[day];
+    const r = (remote || {})[day];
+    // Two legacy numbers — keep the max (best guess at the truth).
+    if (typeof l === "number" && typeof r === "number") {
+      merged[day] = Math.max(l, r);
+      continue;
+    }
+    // One side is per-device object, the other is legacy — promote to per-device.
+    const lObj = typeof l === "object" && l ? l : (typeof l === "number" ? { __legacy__: l } : {});
+    const rObj = typeof r === "object" && r ? r : (typeof r === "number" ? { __legacy__: r } : {});
+    const combined = { ...lObj };
+    for (const [device, count] of Object.entries(rObj)) {
+      combined[device] = Math.max(combined[device] || 0, count || 0);
+    }
+    merged[day] = combined;
   }
   return merged;
 };
@@ -3196,12 +3292,29 @@ export default function VocabApp() {
   const mobile = useIsMobile();
   const [cards, setCards] = useState([]);
   const [practiceDays, setPracticeDays] = useState({});
+  const [studyTime, setStudyTime] = useState({}); // { "YYYY-MM-DD": seconds }
+  const [activeSession, setActiveSession] = useState(null); // { startedAt, lastSeenAt, accumulatedSec } | null
+  const [liveElapsed, setLiveElapsed] = useState(0);
+  const [timerToast, setTimerToast] = useState(null); // { message }
   const [view, setView] = useState("practice");
   const [loaded, setLoaded] = useState(false);
   const [heatmapYear, setHeatmapYear] = useState(new Date().getFullYear());
+  const [studyTimePeriod, setStudyTimePeriod] = useState("week");
   const [showAddInline, setShowAddInline] = useState(false);
   const [showImportInline, setShowImportInline] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showStudyTimeEditModal, setShowStudyTimeEditModal] = useState(false);
+  const [lastManualBackup, setLastManualBackup] = useState(() => {
+    try { return Number(localStorage.getItem("vocab-last-manual-backup")) || 0; } catch { return 0; }
+  });
+  const [lastAutoSnapshot, setLastAutoSnapshot] = useState(() => {
+    try { return Number(localStorage.getItem("vocab-last-snapshot")) || 0; } catch { return 0; }
+  });
+  const [backupToast, setBackupToast] = useState(null);
+  const [showSnapshotPicker, setShowSnapshotPicker] = useState(false);
+  const [snapshotList, setSnapshotList] = useState(null); // null = not loaded, [] = empty, [...] = loaded
+  const [snapshotListError, setSnapshotListError] = useState("");
+  const importFileRef = useRef(null);
   const [deletedCards, setDeletedCards] = useState({});
   const [sortKey, setSortKey] = useState("dueDate");
   const [sortDir, setSortDir] = useState("asc");
@@ -3215,10 +3328,11 @@ export default function VocabApp() {
   });
   const [activityRange, setActivityRange] = useState("month");
   const [studyDirection, setStudyDirection] = useState("en-pt");
-  const [answerMode, setAnswerMode] = useState("passive");
+  const [answerMode, setAnswerMode] = useState("type");
   const [settings, setSettings] = useState({
     theme: "light",
     dailyGoal: 20,
+    newCardsPerDay: 10,
     cardOrder: "due",
     lang: "pt-BR",
     apiKey: "",
@@ -3297,9 +3411,13 @@ export default function VocabApp() {
       let localCards = [];
       let localDays = {};
       let localDeleted = {};
+      let localStudyTime = {};
+      let localActiveSession = null;
       try { const r = await window.storage.get("vocab-cards"); if (r) localCards = JSON.parse(r.value); } catch {}
       try { const r = await window.storage.get("vocab-practice-days"); if (r) localDays = JSON.parse(r.value); } catch {}
       try { const r = await window.storage.get("vocab-deleted"); if (r) localDeleted = JSON.parse(r.value); } catch {}
+      try { const r = await window.storage.get("vocab-study-time"); if (r) localStudyTime = JSON.parse(r.value); } catch {}
+      try { const r = await window.storage.get("vocab-active-session"); if (r) localActiveSession = JSON.parse(r.value); } catch {}
       // One-time RemNote due date + last practiced migration
       let didRemnoteMigration = false;
       let remnotePracticeDays = {};
@@ -3323,6 +3441,35 @@ export default function VocabApp() {
       setCards(localCards);
       setPracticeDays(localDays);
       setDeletedCards(localDeleted);
+      setStudyTime(localStudyTime);
+      // Recover active session (if any)
+      if (localActiveSession && localActiveSession.startedAt && localActiveSession.lastSeenAt) {
+        const now = Date.now();
+        const gap = now - localActiveSession.lastSeenAt;
+        if (gap < IDLE_CAP_MS) {
+          // Continue running — count the gap as study time
+          setActiveSession({
+            startedAt: localActiveSession.startedAt,
+            lastSeenAt: now,
+            accumulatedSec: (localActiveSession.accumulatedSec || 0) + Math.floor(gap / 1000),
+          });
+        } else {
+          // Gap too long — flush what we had and stop
+          const dateKey = localDateStr(new Date(localActiveSession.lastSeenAt));
+          const accumulated = Math.floor(localActiveSession.accumulatedSec || 0);
+          if (accumulated > 0) {
+            const nextStudyTime = { ...localStudyTime, [dateKey]: (localStudyTime[dateKey] || 0) + accumulated };
+            setStudyTime(nextStudyTime);
+            window.storage.set("vocab-study-time", JSON.stringify(nextStudyTime)).catch(() => {});
+          }
+          window.storage.set("vocab-active-session", JSON.stringify(null)).catch(() => {});
+          const gapHours = Math.floor(gap / 3600000);
+          const gapMins = Math.floor((gap % 3600000) / 60000);
+          const awayLabel = gapHours > 0 ? `${gapHours}h ${gapMins}m` : `${gapMins}m`;
+          setTimerToast({ message: `Timer auto-stopped — you were away ${awayLabel}` });
+          setTimeout(() => setTimerToast(null), 6000);
+        }
+      }
       setLoaded(true);
 
       // Background sync with Google Sheets
@@ -3424,6 +3571,82 @@ export default function VocabApp() {
       scheduleSyncIfDirty();
     }
   }, [settings, scheduleSyncIfDirty]);
+  const studyTimeRef = useRef(studyTime);
+  const activeSessionRef = useRef(activeSession);
+  useEffect(() => { studyTimeRef.current = studyTime; }, [studyTime]);
+  useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
+  const persistStudyTime = useCallback((next) => {
+    window.storage.set("vocab-study-time", JSON.stringify(next)).catch(() => {});
+  }, []);
+  const setStudyTimeForDate = useCallback((date, seconds) => {
+    setStudyTime((prev) => {
+      const next = { ...prev };
+      if (seconds > 0) next[date] = seconds;
+      else delete next[date];
+      persistStudyTime(next);
+      return next;
+    });
+  }, [persistStudyTime]);
+  const deleteStudyTimeForDate = useCallback((date) => {
+    setStudyTime((prev) => {
+      const next = { ...prev };
+      delete next[date];
+      persistStudyTime(next);
+      return next;
+    });
+  }, [persistStudyTime]);
+  const persistActiveSession = useCallback((next) => {
+    window.storage.set("vocab-active-session", JSON.stringify(next)).catch(() => {});
+  }, []);
+  const startTimer = useCallback(() => {
+    const now = Date.now();
+    const session = { startedAt: now, lastSeenAt: now, accumulatedSec: 0 };
+    setActiveSession(session);
+    persistActiveSession(session);
+  }, [persistActiveSession]);
+  const stopTimer = useCallback(() => {
+    const s = activeSessionRef.current;
+    if (!s) return;
+    const now = Date.now();
+    const finalSec = (s.accumulatedSec || 0) + Math.max(0, Math.floor((now - s.lastSeenAt) / 1000));
+    if (finalSec > 0) {
+      const dateKey = localDateStr(new Date(s.lastSeenAt));
+      const next = { ...studyTimeRef.current, [dateKey]: (studyTimeRef.current[dateKey] || 0) + finalSec };
+      setStudyTime(next);
+      persistStudyTime(next);
+    }
+    setActiveSession(null);
+    persistActiveSession(null);
+    setLiveElapsed(0);
+  }, [persistStudyTime, persistActiveSession]);
+  const heartbeat = useCallback(() => {
+    const s = activeSessionRef.current;
+    if (!s) return;
+    const now = Date.now();
+    const gap = now - s.lastSeenAt;
+    if (gap >= IDLE_CAP_MS) {
+      // Idle cap exceeded — auto-stop at lastSeenAt, preserve elapsed up to then
+      const dateKey = localDateStr(new Date(s.lastSeenAt));
+      const accumulated = Math.floor(s.accumulatedSec || 0);
+      if (accumulated > 0) {
+        const next = { ...studyTimeRef.current, [dateKey]: (studyTimeRef.current[dateKey] || 0) + accumulated };
+        setStudyTime(next);
+        persistStudyTime(next);
+      }
+      setActiveSession(null);
+      persistActiveSession(null);
+      setLiveElapsed(0);
+      const gapHours = Math.floor(gap / 3600000);
+      const gapMins = Math.floor((gap % 3600000) / 60000);
+      const awayLabel = gapHours > 0 ? `${gapHours}h ${gapMins}m` : `${gapMins}m`;
+      setTimerToast({ message: `Timer auto-stopped — you were away ${awayLabel}` });
+      setTimeout(() => setTimerToast(null), 6000);
+      return;
+    }
+    const updated = { ...s, lastSeenAt: now, accumulatedSec: (s.accumulatedSec || 0) + Math.floor(gap / 1000) };
+    setActiveSession(updated);
+    persistActiveSession(updated);
+  }, [persistStudyTime, persistActiveSession]);
   const saveSettings = useCallback(async (newSettings) => {
     setSettings(newSettings);
     try { await window.storage.set("vocab-settings", JSON.stringify(newSettings)); } catch (e) { console.error("Settings save failed:", e); }
@@ -3449,13 +3672,13 @@ export default function VocabApp() {
       return nc;
     });
   }, [save]);
-  const reviewCard = (id, quality) => {
-    const nc = cards.map((c) => c.id === id ? FSRS.review(c, quality) : c);
-    const nd = { ...practiceDays }; const t = today(); nd[t] = (nd[t] || 0) + 1;
-    setCards(nc); setPracticeDays(nd); save(nc, nd);
-  };
-  const [skippedIds, setSkippedIds] = useState(new Set());
-  const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };
+  const togglePriority = useCallback((id) => {
+    setCards(prev => {
+      const nc = prev.map((c) => c.id === id ? { ...c, priority: !c.priority, modifiedAt: Date.now() } : c);
+      setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
+      return nc;
+    });
+  }, [save]);
   const suspendCard = useCallback((id) => {
     setCards((prev) => {
       const nc = prev.map((c) => c.id === id ? { ...c, suspended: true, modifiedAt: Date.now() } : c);
@@ -3470,16 +3693,217 @@ export default function VocabApp() {
       return nc;
     });
   }, [save]);
+  // ─── Backup helpers ───
+  const buildBackupBlob = useCallback(() => {
+    const safeSettings = { ...settings };
+    delete safeSettings.apiKey;
+    delete safeSettings.scriptUrl;
+    return {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      appVersion: "1.0.0",
+      data: {
+        "vocab-cards": cardsRef.current,
+        "vocab-practice-days": practiceDaysRef.current,
+        "vocab-deleted": deletedCardsRef.current,
+        "vocab-settings": safeSettings,
+        "vocab-study-time": studyTimeRef.current,
+      },
+    };
+  }, [settings]);
+  const exportBackupToFile = useCallback(() => {
+    const blob = buildBackupBlob();
+    const json = JSON.stringify(blob, null, 2);
+    const file = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url; a.download = `vocabulario_backup_${today()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    const now = Date.now();
+    try { localStorage.setItem("vocab-last-manual-backup", String(now)); } catch {}
+    setLastManualBackup(now);
+  }, [buildBackupBlob]);
+  const applyBackup = useCallback(async (blob) => {
+    if (!blob || typeof blob !== "object" || !blob.data) throw new Error("invalid");
+    const data = blob.data;
+    const keys = ["vocab-cards", "vocab-practice-days", "vocab-deleted", "vocab-settings", "vocab-study-time"];
+    for (const k of keys) {
+      if (data[k] === undefined) continue;
+      try { await window.storage.set(k, JSON.stringify(data[k])); } catch {}
+    }
+    setBackupToast({ message: t.importBackupSuccess });
+    setTimeout(() => window.location.reload(), 800);
+  }, []);
+  const importBackupFromFile = useCallback((file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const blob = JSON.parse(e.target.result);
+        if (!confirm(t.importBackupConfirm)) return;
+        await applyBackup(blob);
+      } catch (err) {
+        setBackupToast({ message: t.importBackupInvalid });
+        setTimeout(() => setBackupToast(null), 4000);
+      }
+    };
+    reader.readAsText(file);
+  }, [applyBackup]);
+  // Auto-snapshot to Sheets — runs at most once per app load and only when > 7 days
+  // since the last snapshot. Fire-and-forget; errors are logged but don't block.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!settings.scriptUrl) return;
+    const last = Number(lastAutoSnapshot) || 0;
+    const sevenDays = 7 * 86400000;
+    if (Date.now() - last < sevenDays) return;
+    (async () => {
+      try {
+        const blob = JSON.stringify(buildBackupBlob());
+        await GSheets.writeSnapshot(settings.scriptUrl, blob);
+        const now = Date.now();
+        try { localStorage.setItem("vocab-last-snapshot", String(now)); } catch {}
+        setLastAutoSnapshot(now);
+      } catch (e) {
+        console.warn("Auto-snapshot failed:", e.message);
+      }
+    })();
+    // We only want to attempt once per mount after data has loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, settings.scriptUrl]);
+  const loadSnapshotList = useCallback(async () => {
+    if (!settings.scriptUrl) {
+      setSnapshotListError(t.snapshotPickerError);
+      setSnapshotList([]);
+      return;
+    }
+    setSnapshotList(null);
+    setSnapshotListError("");
+    try {
+      const list = await GSheets.listSnapshots(settings.scriptUrl);
+      setSnapshotList(list);
+    } catch (e) {
+      setSnapshotListError(t.snapshotPickerError);
+      setSnapshotList([]);
+    }
+  }, [settings.scriptUrl]);
+  const restoreFromSnapshot = useCallback(async (snapshotDate) => {
+    if (!settings.scriptUrl) return;
+    if (!confirm(t.importBackupConfirm)) return;
+    try {
+      const raw = await GSheets.readSnapshot(settings.scriptUrl, snapshotDate);
+      if (!raw) throw new Error("not found");
+      const blob = typeof raw === "string" ? JSON.parse(raw) : raw;
+      await applyBackup(blob);
+    } catch (e) {
+      setBackupToast({ message: t.importBackupInvalid });
+      setTimeout(() => setBackupToast(null), 4000);
+    }
+  }, [settings.scriptUrl, applyBackup]);
+  const reviewCard = (id, quality) => {
+    const nc = cards.map((c) => c.id === id ? FSRS.review(c, quality) : c);
+    const nd = { ...practiceDays };
+    const t = today();
+    const dev = getDeviceId();
+    // Migrate legacy numeric entries to the per-device object shape on first write.
+    let entry = nd[t];
+    if (typeof entry === "number") entry = { __legacy__: entry };
+    if (!entry || typeof entry !== "object") entry = {};
+    entry = { ...entry, [dev]: (entry[dev] || 0) + 1 };
+    nd[t] = entry;
+    setCards(nc); setPracticeDays(nd); save(nc, nd);
+  };
+  const [skippedIds, setSkippedIds] = useState(new Set());
+  const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };
   // Tick every 30s so forgot-cards (10min delay) reappear automatically
   const [tick, setTick] = useState(0);
   useEffect(() => { const id = setInterval(() => setTick((t) => t + 1), 30000); return () => clearInterval(id); }, []);
+  // Timer: 30s heartbeat while a session is active
+  useEffect(() => {
+    if (!activeSession) return;
+    const id = setInterval(heartbeat, HEARTBEAT_MS);
+    return () => clearInterval(id);
+  }, [activeSession, heartbeat]);
+  // Timer: 1s live counter for the ticking UI
+  useEffect(() => {
+    if (!activeSession) { setLiveElapsed(0); return; }
+    const update = () => {
+      const s = activeSessionRef.current;
+      if (!s) return;
+      setLiveElapsed((s.accumulatedSec || 0) + Math.max(0, Math.floor((Date.now() - s.lastSeenAt) / 1000)));
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [activeSession]);
+  // Timer: persist on visibility change and unload
+  useEffect(() => {
+    const onHide = () => {
+      const s = activeSessionRef.current;
+      if (!s) return;
+      const now = Date.now();
+      const updated = { ...s, lastSeenAt: now, accumulatedSec: (s.accumulatedSec || 0) + Math.max(0, Math.floor((now - s.lastSeenAt) / 1000)) };
+      activeSessionRef.current = updated;
+      persistActiveSession(updated);
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") onHide();
+      else heartbeat();
+    };
+    window.addEventListener("beforeunload", onHide);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("beforeunload", onHide);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [heartbeat, persistActiveSession]);
+  const newCardsIntroducedToday = useMemo(() => {
+    const t = today();
+    return cards.filter((c) => c.firstReviewedAt === t).length;
+  }, [cards, tick]);
   const dueCards = useMemo(() => {
-    let due = cards.filter((c) => !c.suspended && c.dueDate <= today() && !skippedIds.has(c.id) && (!c.dueAfter || Date.now() >= c.dueAfter));
-    if (settings.cardOrder === "newest") {
-      return due.sort((a, b) => b.id.localeCompare(a.id));
+    const due = cards.filter((c) => !c.suspended && c.dueDate <= today() && !skippedIds.has(c.id) && (!c.dueAfter || Date.now() >= c.dueAfter));
+    // Three buckets:
+    //   reviews — already graduated cards
+    //   learning — new cards introduced today, still doing 10-min step (reps=0, firstReviewedAt set)
+    //   fresh — never-touched new cards
+    const reviews = due.filter((c) => (c.reps || 0) > 0);
+    const learning = due.filter((c) => (c.reps || 0) === 0 && c.firstReviewedAt);
+    const fresh = due.filter((c) => (c.reps || 0) === 0 && !c.firstReviewedAt);
+    const sortFn = settings.cardOrder === "newest"
+      ? (a, b) => b.id.localeCompare(a.id)
+      : (a, b) => a.dueDate.localeCompare(b.dueDate);
+    // Priority new cards first; then current sort
+    const sortedFresh = [...fresh].sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority ? -1 : 1;
+      return sortFn(a, b);
+    });
+    // Daily new-card cap: only show up to N - already-introduced-today
+    const cap = Math.max(0, (settings.newCardsPerDay ?? 10));
+    const slots = Math.max(0, cap - newCardsIntroducedToday);
+    const freshToday = sortedFresh.slice(0, slots);
+    // Learning cards always show (they're past the cap already); show them up-front
+    // so the 10-min re-exposure isn't buried at the end of the queue.
+    const sortedLearning = [...learning].sort((a, b) => (a.dueAfter || 0) - (b.dueAfter || 0));
+    const sortedRest = [...reviews].sort(sortFn);
+    const sortedReviews = [...sortedLearning, ...sortedRest];
+    // Interleave new cards evenly into the review stream
+    if (freshToday.length === 0) return sortedReviews;
+    if (sortedReviews.length === 0) return freshToday;
+    const result = [];
+    const step = sortedReviews.length / freshToday.length;
+    let newIdx = 0;
+    let nextNewAt = step / 2;
+    for (let i = 0; i < sortedReviews.length; i++) {
+      while (newIdx < freshToday.length && i >= nextNewAt) {
+        result.push(freshToday[newIdx++]);
+        nextNewAt += step;
+      }
+      result.push(sortedReviews[i]);
     }
-    return due.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  }, [cards, skippedIds, settings.cardOrder, tick]);
+    while (newIdx < freshToday.length) result.push(freshToday[newIdx++]);
+    return result;
+  }, [cards, skippedIds, settings.cardOrder, settings.newCardsPerDay, newCardsIntroducedToday, tick]);
   const sortedCards = useMemo(() => {
     const so = { new: 0, learning: 1, young: 2, mature: 3, mastered: 4 };
     return [...cards].sort((a, b) => {
@@ -3492,6 +3916,12 @@ export default function VocabApp() {
       else { va = ""; vb = ""; }
       if (va < vb) return sortDir === "asc" ? -1 : 1;
       if (va > vb) return sortDir === "asc" ? 1 : -1;
+      // Secondary sort: when primary keys tie, fall back to newest-added first
+      if (sortKey === "stage" || va === vb) {
+        const ai = a.id || ""; const bi = b.id || "";
+        if (ai < bi) return 1;
+        if (ai > bi) return -1;
+      }
       return 0;
     });
   }, [cards, sortKey, sortDir]);
@@ -3516,7 +3946,6 @@ export default function VocabApp() {
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
     { id: "words", label: t.words, badge: cards.length || null },
-    { id: "chat", label: t.chat, badge: null },
     { id: "heatmap", label: t.progress },
   ];
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
@@ -3529,6 +3958,9 @@ export default function VocabApp() {
         button:active { transform: scale(0.98); }
         [contenteditable] b, [contenteditable] strong { color: ${T.keyword}; font-weight: 700; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type="number"] { -moz-appearance: textfield; }
         .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
@@ -3538,6 +3970,43 @@ export default function VocabApp() {
             vocabulário
           </h1>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={activeSession ? stopTimer : startTimer}
+            title={activeSession ? t.stopTimer : t.startTimer}
+            style={activeSession ? {
+              display: "flex", alignItems: "center", gap: 7,
+              padding: "0 12px", height: 34, borderRadius: 9999,
+              background: T.dangerBg,
+              border: `1px solid rgba(196,72,62,0.2)`,
+              cursor: "pointer", transition: "all 0.2s",
+              fontFamily: font.mono,
+              fontSize: mobile ? 10 : 11,
+              color: T.danger,
+              fontVariantNumeric: "tabular-nums",
+              letterSpacing: 0.3,
+            } : {
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 34, height: 34, borderRadius: 9999,
+              background: T.accentSoft,
+              border: `1px solid ${T.border}`,
+              cursor: "pointer", transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+          >
+            {activeSession ? (
+              <>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
+                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                </svg>
+                <span>{formatDuration(liveElapsed)}</span>
+              </>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill={T.textTertiary} stroke="none" aria-hidden>
+                <polygon points="7,5 19,12 7,19" />
+              </svg>
+            )}
+          </button>
           <button
             onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
             disabled={syncStatus === "syncing"}
@@ -3703,7 +4172,6 @@ export default function VocabApp() {
                   </div>
                   <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
                     {[
-                      { id: "passive", label: t.modePassive },
                       { id: "type", label: t.modeType },
                       { id: "write", label: t.modeWrite },
                     ].map((opt) => (
@@ -3746,14 +4214,6 @@ export default function VocabApp() {
               </>
             )}
           </>
-        )}
-        {view === "chat" && (
-          <ChatView
-            dueCards={dueCards}
-            settings={settings}
-            onReviewCard={reviewCard}
-            onGoToSettings={() => setShowSettingsModal(true)}
-          />
         )}
         {view === "words" && (
           <>
@@ -3832,9 +4292,9 @@ export default function VocabApp() {
               <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard, boxShadow: mobile ? "none" : T.shadow }}>
                 <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 2fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
                   {[
-                    { key: "word", label: t.headerPalavra },
-                    { key: "translation", label: t.headerEnglish },
-                    { key: "phrase", label: t.headerPortuguese },
+                    { key: null, label: t.headerPalavra },
+                    { key: null, label: t.headerEnglish },
+                    { key: null, label: t.headerPortuguese },
                     { key: "stage", label: t.headerStage },
                     { key: "dueDate", label: t.headerDue },
                     { key: null, label: "" },
@@ -3843,29 +4303,40 @@ export default function VocabApp() {
                       key={ci}
                       onClick={() => {
                         if (!col.key) return;
-                        setSortKey((prev) => prev === col.key ? col.key : col.key);
-                        setSortDir((prev) => sortKey === col.key ? (prev === "asc" ? "desc" : "asc") : "asc");
+                        if (sortKey === col.key) {
+                          setSortDir((prev) => prev === "asc" ? "desc" : "asc");
+                        } else {
+                          setSortKey(col.key);
+                          setSortDir("asc");
+                        }
                       }}
                       style={{
-                        fontFamily: font.mono, fontSize: 9, color: sortKey === col.key ? T.text : T.textTertiary,
+                        fontFamily: font.mono, fontSize: 9,
+                        color: sortKey === col.key ? T.text : T.textTertiary,
+                        fontWeight: sortKey === col.key ? 700 : 500,
                         textTransform: "uppercase", letterSpacing: 2,
                         cursor: col.key ? "pointer" : "default",
                         userSelect: "none",
-                        display: "flex", alignItems: "center", gap: 4,
+                        display: "flex", alignItems: "center", gap: 6,
                         transition: "color 0.15s",
                       }}
                       onMouseEnter={(e) => { if (col.key) e.currentTarget.style.color = T.text; }}
                       onMouseLeave={(e) => { if (col.key) e.currentTarget.style.color = sortKey === col.key ? T.text : T.textTertiary; }}
                     >
                       {col.label}
-                      {col.key && sortKey === col.key && (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round">
-                          {sortDir === "asc"
-                            ? <polyline points="18 15 12 9 6 15"/>
-                            : <polyline points="6 9 12 15 18 9"/>
-                          }
-                        </svg>
-                      )}
+                      {col.key && (() => {
+                        const isActive = sortKey === col.key;
+                        const ascActive = isActive && sortDir === "asc";
+                        const descActive = isActive && sortDir === "desc";
+                        const idle = T.textPlaceholder;
+                        const on = T.text;
+                        return (
+                          <svg width="9" height="12" viewBox="0 0 10 14" fill="none" aria-hidden style={{ flexShrink: 0 }}>
+                            <polyline points="2,5 5,2 8,5" stroke={ascActive ? on : idle} strokeWidth={ascActive ? 2.5 : 1.6} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                            <polyline points="2,9 5,12 8,9" stroke={descActive ? on : idle} strokeWidth={descActive ? 2.5 : 1.6} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+                          </svg>
+                        );
+                      })()}
                     </span>
                   ))}
                 </div>
@@ -3878,7 +4349,8 @@ export default function VocabApp() {
                     <>
                       {groupByStage ? (
                         ["new", "learning", "young", "mature", "mastered"].map(stage => {
-                          const stageCards = activeCards.filter(c => getStage(c) === stage);
+                          // Sub-sort by newest-added within each stage group.
+                          const stageCards = activeCards.filter(c => getStage(c) === stage).sort((a, b) => (b.id || "").localeCompare(a.id || ""));
                           if (stageCards.length === 0) return null;
                           const sc = stageColors[stage];
                           const isCollapsed = collapsedGroups.has(stage);
@@ -3914,13 +4386,13 @@ export default function VocabApp() {
                                 </span>
                               </div>
                               {!isCollapsed && stageCards.map(card => (
-                                <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
+                                <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
                               ))}
                             </div>
                           );
                         })
                       ) : (
-                        activeCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />)
+                        activeCards.map((card) => <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />)
                       )}
                       {suspendedCards.length > 0 && (
                         <div style={{ opacity: 0.6 }}>
@@ -3956,7 +4428,7 @@ export default function VocabApp() {
                             </span>
                           </div>
                           {!suspendedCollapsed && suspendedCards.map(card => (
-                            <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
+                            <WordRow key={card.id} card={card} onDelete={deleteCard} onSpeak={speakPT} onUpdate={updateCard} onTogglePriority={togglePriority} onSuspend={suspendCard} onUnsuspend={unsuspendCard} />
                           ))}
                         </div>
                       )}
@@ -3970,38 +4442,139 @@ export default function VocabApp() {
         {view === "heatmap" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: T.textTertiary }}>...</div>}>
           <RechartsModule>
-          {({ PieChart, Pie, Label, Tooltip: RechartsTooltip, Cell, AreaChart, Area, XAxis, CartesianGrid, ResponsiveContainer }) => (
+          {({ PieChart, Pie, Label, Tooltip: RechartsTooltip, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, BarChart, Bar }) => (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "1fr 1fr 1fr 1fr", gap: mobile ? 8 : 14, marginBottom: 14 }}>
               {[
                 { label: t.daysStudied, value: (() => {
                   const yr = new Date().getFullYear();
-                  return Object.keys(practiceDays).filter((d) => d.startsWith(String(yr)) && practiceDays[d] > 0).length;
+                  return Object.keys(practiceDays).filter((d) => d.startsWith(String(yr)) && totalForDay(practiceDays[d]) > 0).length;
                 })() },
                 { label: t.dayStreak, value: (() => {
                   let streak = 0;
                   let d = new Date();
-                  if (!practiceDays[localDateStr(d)] || practiceDays[localDateStr(d)] === 0) {
+                  if (totalForDay(practiceDays[localDateStr(d)]) === 0) {
                     d.setDate(d.getDate() - 1);
                   }
                   while (true) {
                     const ds = localDateStr(d);
-                    if (practiceDays[ds] && practiceDays[ds] > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
+                    if (totalForDay(practiceDays[ds]) > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
                   }
                   return streak;
                 })() },
                 { label: t.avgPerDay, value: (() => {
-                  const ad = Object.values(practiceDays).filter((v) => v > 0).length;
-                  if (!ad) return 0;
-                  return (Object.values(practiceDays).reduce((a, b) => a + b, 0) / ad).toFixed(1);
+                  const totals = Object.values(practiceDays).map(totalForDay).filter((v) => v > 0);
+                  if (!totals.length) return 0;
+                  return (totals.reduce((a, b) => a + b, 0) / totals.length).toFixed(1);
+                })() },
+                { label: t.totalTime, editable: true, value: (() => {
+                  const yr = String(new Date().getFullYear());
+                  const totalSec = Object.entries(studyTime)
+                    .filter(([d]) => d.startsWith(yr))
+                    .reduce((a, [, s]) => a + (s || 0), 0)
+                    + (activeSession ? liveElapsed : 0);
+                  return formatDuration(totalSec, { short: true });
                 })() },
               ].map((stat, i) => (
-                <div key={i} style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "14px 8px" : "22px 16px", textAlign: "center", boxShadow: T.shadow }}>
+                <div key={i} style={{ position: "relative", background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "14px 8px" : "22px 16px", textAlign: "center", boxShadow: T.shadow }}>
+                  {stat.editable && (
+                    <button
+                      onClick={() => setShowStudyTimeEditModal(true)}
+                      aria-label={t.editTimeLogs}
+                      title={t.editTimeLogs}
+                      style={{
+                        position: "absolute", top: 8, right: 8,
+                        background: "transparent", border: "none", cursor: "pointer",
+                        padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
+                    >
+                      <PencilIcon size={14} color={T.textSecondary} />
+                    </button>
+                  )}
                   <div style={{ fontFamily: font.display, fontSize: mobile ? 22 : 32, fontWeight: 700, color: T.text }}>{stat.value}</div>
                   <div style={{ fontFamily: font.mono, fontSize: mobile ? 8 : 9, color: T.textTertiary, textTransform: "uppercase", letterSpacing: mobile ? 1 : 1.8, marginTop: 4 }}>{stat.label}</div>
                 </div>
               ))}
             </div>
+            {(() => {
+              const ranges = { day: 30, week: 12, month: 12, year: 5 };
+              const range = ranges[studyTimePeriod] || 12;
+              const data = aggregateStudyTime(studyTime, studyTimePeriod, range).map((b) => ({
+                ...b,
+                minutes: Math.round(b.seconds / 60),
+                hours: +(b.seconds / 3600).toFixed(2),
+                value: (studyTimePeriod === "month" || studyTimePeriod === "year") ? +(b.seconds / 3600).toFixed(2) : Math.round(b.seconds / 60),
+              }));
+              const yUnit = (studyTimePeriod === "month" || studyTimePeriod === "year") ? "h" : "m";
+              const hasAny = data.some((d) => d.seconds > 0);
+              return (
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? "16px 16px 8px" : "22px 24px 14px", boxShadow: T.shadow, marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+                    <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text }}>
+                      {t.studyTimeReport}
+                    </div>
+                    <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
+                      {[
+                        { id: "day", label: t.periodDay },
+                        { id: "week", label: t.periodWeek },
+                        { id: "month", label: t.periodMonth },
+                        { id: "year", label: t.periodYear },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setStudyTimePeriod(opt.id)}
+                          style={{
+                            padding: "5px 14px",
+                            background: studyTimePeriod === opt.id ? T.bgCard : "transparent",
+                            border: "none", borderRadius: 9999,
+                            fontFamily: font.mono, fontSize: 11, fontWeight: 500,
+                            color: studyTimePeriod === opt.id ? T.text : T.textTertiary,
+                            cursor: "pointer", transition: "all 0.15s",
+                            boxShadow: studyTimePeriod === opt.id ? T.shadow : "none",
+                            letterSpacing: 0.5, textTransform: "lowercase",
+                          }}
+                          onMouseEnter={(e) => { if (studyTimePeriod !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
+                          onMouseLeave={(e) => { if (studyTimePeriod !== opt.id) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {hasAny ? (
+                    <ResponsiveContainer width="100%" height={mobile ? 180 : 220}>
+                      <BarChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                        <CartesianGrid stroke={T.border} strokeDasharray="2 4" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: T.textTertiary, fontFamily: font.mono, fontSize: 10 }} axisLine={{ stroke: T.border }} tickLine={false} interval={mobile && studyTimePeriod === "day" ? 4 : 0} />
+                        <YAxis tick={{ fill: T.textTertiary, fontFamily: font.mono, fontSize: 10 }} axisLine={false} tickLine={false} width={36} tickFormatter={(v) => `${v}${yUnit}`} />
+                        <RechartsTooltip
+                          cursor={{ fill: T.bgCardHover }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const d = payload[0].payload;
+                              return (
+                                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 8, padding: "8px 12px", boxShadow: T.shadowLg }}>
+                                  <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, marginBottom: 4 }}>{d.startDate}</div>
+                                  <div style={{ fontFamily: font.body, fontSize: 13, fontWeight: 600, color: T.text }}>{formatDuration(d.seconds, { short: true })}</div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="value" fill={T.accent} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div style={{ padding: "40px 20px", textAlign: "center", fontFamily: font.body, fontSize: 13, color: T.textTertiary }}>
+                      No study time logged yet — start the timer on the Study page.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 12 : 28, boxShadow: T.shadow, overflowX: "auto", marginBottom: 14 }}>
               <CalendarHeatmap practiceDays={practiceDays} year={heatmapYear} onYearChange={setHeatmapYear} />
             </div>
@@ -4238,7 +4811,7 @@ export default function VocabApp() {
                 const ds = localDateStr(d);
                 chartData.push({
                   date: ds,
-                  reviews: practiceDays[ds] || 0,
+                  reviews: totalForDay(practiceDays[ds]),
                 });
               }
               const totalInRange = chartData.reduce((a, b) => a + b.reviews, 0);
@@ -4253,39 +4826,31 @@ export default function VocabApp() {
                         {t.studyActivityDesc}
                       </div>
                     </div>
-                    <div style={{ position: "relative", display: "inline-block" }}>
-                      <span style={{ position: "absolute", visibility: "hidden", whiteSpace: "nowrap", fontFamily: font.body, fontSize: 13, padding: "8px 32px 8px 14px" }} ref={(el) => {
-                        if (el && el.parentElement) {
-                          const sel = el.parentElement.querySelector("select");
-                          if (sel) sel.style.width = (el.offsetWidth + 8) + "px";
-                        }
-                      }}>
-                        {activityRange === "week" ? t.thisWeek : activityRange === "month" ? t.thisMonth : t.thisYear}
-                      </span>
-                      <select
-                        value={activityRange}
-                        onChange={(e) => setActivityRange(e.target.value)}
-                        style={{
-                          appearance: "none",
-                          padding: "8px 32px 8px 14px",
-                          background: T.bgInput,
-                          border: `1px solid ${T.border}`,
-                          borderRadius: T.radiusSm,
-                          color: T.text,
-                          fontFamily: font.body,
-                          fontSize: 13,
-                          cursor: "pointer",
-                          outline: "none",
-                        }}
-                      >
-                        <option value="week">{t.thisWeek}</option>
-                        <option value="month">{t.thisMonth}</option>
-                        <option value="year">{t.thisYear}</option>
-                      </select>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2" strokeLinecap="round"
-                        style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}>
-                        <polyline points="6 9 12 15 18 9"/>
-                      </svg>
+                    <div style={{ display: "inline-flex", background: T.bgInput, borderRadius: 9999, padding: 3 }}>
+                      {[
+                        { id: "week", label: t.periodWeek },
+                        { id: "month", label: t.periodMonth },
+                        { id: "year", label: t.periodYear },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => setActivityRange(opt.id)}
+                          style={{
+                            padding: "5px 14px",
+                            background: activityRange === opt.id ? T.bgCard : "transparent",
+                            border: "none", borderRadius: 9999,
+                            fontFamily: font.mono, fontSize: 11, fontWeight: 500,
+                            color: activityRange === opt.id ? T.text : T.textTertiary,
+                            cursor: "pointer", transition: "all 0.15s",
+                            boxShadow: activityRange === opt.id ? T.shadow : "none",
+                            letterSpacing: 0.5, textTransform: "lowercase",
+                          }}
+                          onMouseEnter={(e) => { if (activityRange !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
+                          onMouseLeave={(e) => { if (activityRange !== opt.id) e.currentTarget.style.background = "transparent"; }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <div style={{ padding: "20px 20px 16px" }}>
@@ -4360,6 +4925,158 @@ export default function VocabApp() {
           </RechartsModule>
           </Suspense>
         )}
+        {timerToast && (
+          <div style={{
+            position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+            background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+            padding: "12px 20px", boxShadow: T.shadowLg,
+            fontFamily: font.body, fontSize: 13, color: T.text,
+            zIndex: 200, maxWidth: "90vw",
+          }}>
+            {timerToast.message}
+          </div>
+        )}
+        {backupToast && (
+          <div style={{
+            position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+            background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+            padding: "12px 20px", boxShadow: T.shadowLg,
+            fontFamily: font.body, fontSize: 13, color: T.text,
+            zIndex: 200, maxWidth: "90vw",
+          }}>
+            {backupToast.message}
+          </div>
+        )}
+        <Modal open={showSnapshotPicker} onClose={() => setShowSnapshotPicker(false)} title={t.snapshotPickerTitle}>
+          {snapshotList === null ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", fontFamily: font.body, fontSize: 13, color: T.textTertiary }}>…</div>
+          ) : snapshotListError ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", fontFamily: font.body, fontSize: 13, color: T.danger }}>{snapshotListError}</div>
+          ) : snapshotList.length === 0 ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", fontFamily: font.body, fontSize: 13, color: T.textTertiary }}>{t.snapshotPickerEmpty}</div>
+          ) : (
+            <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, boxShadow: T.shadow, overflow: "hidden", maxWidth: 560 }}>
+              {snapshotList.map((s, i) => {
+                const d = new Date(s.date);
+                const label = isNaN(d.getTime()) ? s.date : `${formatLogDate(localDateStr(d), settings.lang)} · ${d.toLocaleTimeString(settings.lang === "en" ? "en-US" : "pt-BR")}`;
+                const sizeKb = (s.size / 1024).toFixed(1);
+                return (
+                  <button
+                    key={s.date}
+                    onClick={() => { setShowSnapshotPicker(false); restoreFromSnapshot(s.date); }}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      width: "100%", padding: "12px 16px",
+                      background: "none", border: "none", textAlign: "left", cursor: "pointer",
+                      borderBottom: i === snapshotList.length - 1 ? "none" : `1px solid ${T.border}`,
+                      fontFamily: font.body, fontSize: 13, color: T.text,
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                  >
+                    <span>{label}</span>
+                    <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary }}>{sizeKb} KB</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+        <Modal open={showStudyTimeEditModal} onClose={() => setShowStudyTimeEditModal(false)} title={t.editTimeLogs}>
+          {(() => {
+            const entries = Object.entries(studyTime)
+              .filter(([, sec]) => sec > 0)
+              .sort((a, b) => b[0].localeCompare(a[0]));
+            if (entries.length === 0) {
+              return (
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: "40px 20px", boxShadow: T.shadow, textAlign: "center", fontFamily: font.body, fontSize: 14, color: T.textTertiary }}>
+                  {t.noTimeLogs}
+                </div>
+              );
+            }
+            return (
+              <>
+                <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12, lineHeight: 1.5 }}>
+                  {t.editTimeLogsHint}
+                </div>
+                <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, boxShadow: T.shadow, overflow: "hidden", maxWidth: 560 }}>
+                  {entries.map(([date, sec], idx) => (
+                    <div key={date} style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 16px",
+                      borderBottom: idx === entries.length - 1 ? "none" : `1px solid ${T.border}`,
+                      transition: "background 0.12s",
+                    }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <div style={{ flex: 1, fontFamily: font.body, fontSize: 14, fontWeight: 500, color: T.text, minWidth: 0 }}>
+                        {formatLogDate(date, settings.lang)}
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="text"
+                        defaultValue={formatTimeInput(sec)}
+                        onFocus={(e) => { e.target.style.borderColor = T.borderStrong; e.target.select(); }}
+                        onBlur={(e) => {
+                          const original = formatTimeInput(sec);
+                          const typed = e.target.value.trim();
+                          e.target.style.borderColor = T.border;
+                          if (typed === original) return; // user didn't actually edit
+                          const parsed = parseTimeInput(typed);
+                          if (parsed === null) {
+                            e.target.value = original;
+                            return;
+                          }
+                          if (parsed === sec) {
+                            e.target.value = original;
+                            return;
+                          }
+                          e.target.value = formatTimeInput(parsed);
+                          setStudyTimeForDate(date, parsed);
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { e.target.value = formatTimeInput(sec); e.target.blur(); } }}
+                        style={{
+                          width: 88,
+                          padding: "7px 10px",
+                          background: T.bgInput, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                          color: T.text, fontFamily: font.mono, fontSize: 13, outline: "none",
+                          textAlign: "right",
+                          fontVariantNumeric: "tabular-nums",
+                          transition: "border-color 0.15s",
+                        }}
+                      />
+                      <button
+                        onClick={() => deleteStudyTimeForDate(date)}
+                        aria-label={t.deleteEntry}
+                        title={t.deleteEntry}
+                        style={{
+                          flexShrink: 0,
+                          width: 32, height: 32,
+                          background: "transparent", border: "1px solid transparent",
+                          borderRadius: T.radiusSm,
+                          cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          transition: "all 0.15s",
+                          opacity: 0.55,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = T.dangerBg; e.currentTarget.style.borderColor = "rgba(196,72,62,0.2)"; e.currentTarget.style.opacity = "1"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.opacity = "0.55"; }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+        </Modal>
         <Modal open={showSettingsModal} onClose={() => setShowSettingsModal(false)} title={t.settingsTitle}>
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: mobile ? 18 : 28, boxShadow: T.shadow }}>
@@ -4387,6 +5104,36 @@ export default function VocabApp() {
                         }}
                         onMouseEnter={(e) => { if (settings.dailyGoal !== n) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
                         onMouseLeave={(e) => { if (settings.dailyGoal !== n) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ height: 1, background: T.border }} />
+                <div>
+                  <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
+                    {t.newCardsPerDay}
+                  </div>
+                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12 }}>
+                    {t.newCardsPerDayDesc}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    {[5, 10, 15, 20, 30].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => saveSettings({ ...settings, newCardsPerDay: n })}
+                        style={{
+                          padding: mobile ? "8px 12px" : "8px 16px",
+                          background: (settings.newCardsPerDay ?? 10) === n ? T.accent : "transparent",
+                          border: `1px solid ${(settings.newCardsPerDay ?? 10) === n ? T.accent : T.border}`,
+                          borderRadius: T.radiusSm,
+                          color: (settings.newCardsPerDay ?? 10) === n ? T.bg : T.textSecondary,
+                          fontFamily: font.body, fontSize: 13, fontWeight: 500,
+                          cursor: "pointer", transition: "all 0.15s",
+                        }}
+                        onMouseEnter={(e) => { if ((settings.newCardsPerDay ?? 10) !== n) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                        onMouseLeave={(e) => { if ((settings.newCardsPerDay ?? 10) !== n) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
                       >
                         {n}
                       </button>
@@ -4562,6 +5309,152 @@ export default function VocabApp() {
                 </div>
                 <div style={{ height: 1, background: T.border }} />
                 <div>
+                  <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
+                    {t.exportStudyTime}
+                  </div>
+                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12 }}>
+                    {t.exportStudyTimeDesc}
+                  </div>
+                  <button
+                    onClick={() => {
+                      const entries = Object.entries(studyTime).filter(([, sec]) => sec > 0).sort((a, b) => a[0].localeCompare(b[0]));
+                      const header = "date,minutes,hours,session_count\n";
+                      const rows = entries.map(([date, sec]) => {
+                        const minutes = Math.round(sec / 60);
+                        const hours = (sec / 3600).toFixed(2);
+                        return `${date},${minutes},${hours},1`;
+                      }).join("\n");
+                      const totalSec = entries.reduce((a, [, s]) => a + s, 0);
+                      const summary = `\n\ntotal_seconds,${totalSec}\ntotal_minutes,${Math.round(totalSec / 60)}\ntotal_hours,${(totalSec / 3600).toFixed(2)}\n`;
+                      const blob = new Blob([header + rows + summary], { type: "text/csv" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url; a.download = `vocabulario_study_time_${today()}.csv`; a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    disabled={Object.values(studyTime).every((v) => !v)}
+                    style={{
+                      padding: "11px 24px",
+                      background: Object.values(studyTime).some((v) => v) ? "transparent" : T.bgInput,
+                      border: `1px solid ${Object.values(studyTime).some((v) => v) ? T.border : "transparent"}`,
+                      borderRadius: T.radiusSm,
+                      color: Object.values(studyTime).some((v) => v) ? T.textSecondary : T.textPlaceholder,
+                      fontFamily: font.body, fontSize: 13, fontWeight: 500,
+                      cursor: Object.values(studyTime).some((v) => v) ? "pointer" : "default",
+                      display: "flex", alignItems: "center", gap: 8,
+                      transition: "all 0.15s",
+                    }}
+                    onMouseEnter={(e) => { if (Object.values(studyTime).some((v) => v)) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                    onMouseLeave={(e) => { if (Object.values(studyTime).some((v) => v)) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    {t.exportStudyTime}
+                  </button>
+                </div>
+                <div style={{ height: 1, background: T.border }} />
+                <div>
+                  <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text, marginBottom: 4 }}>
+                    {t.backupSection}
+                  </div>
+                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12 }}>
+                    {t.backupSectionDesc}
+                  </div>
+                  {(() => {
+                    const now = Date.now();
+                    const formatAgo = (ts) => {
+                      if (!ts) return t.backupHealthNever;
+                      const elapsed = now - ts;
+                      if (elapsed < 60000) return t.backupHealthJustNow;
+                      if (elapsed < 3600000) return `${Math.floor(elapsed / 60000)} ${t.backupHealthMinutesAgo}`;
+                      if (elapsed < 86400000) return `${Math.floor(elapsed / 3600000)} ${t.backupHealthHoursAgo}`;
+                      return `${Math.floor(elapsed / 86400000)} ${t.backupHealthDaysAgo}`;
+                    };
+                    const manualAge = lastManualBackup ? now - lastManualBackup : Infinity;
+                    const manualColor = !lastManualBackup ? T.danger : manualAge > 90 * 86400000 ? T.danger : manualAge > 30 * 86400000 ? T.warning : T.success;
+                    const snapAge = lastAutoSnapshot ? now - lastAutoSnapshot : Infinity;
+                    const snapColor = !settings.scriptUrl ? T.textTertiary : !lastAutoSnapshot ? T.warning : snapAge > 14 * 86400000 ? T.warning : T.success;
+                    const syncColor = !settings.scriptUrl ? T.textTertiary : syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textTertiary;
+                    const row = (label, value, color) => (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0", borderBottom: `1px solid ${T.border}` }}>
+                        <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.5 }}>{label}</span>
+                        <span style={{ fontFamily: font.mono, fontSize: 12, color: color, fontVariantNumeric: "tabular-nums" }}>{value}</span>
+                      </div>
+                    );
+                    return (
+                      <div style={{ background: T.bgInput, border: `1px solid ${T.border}`, borderRadius: T.radiusSm, padding: "8px 14px", marginBottom: 14 }}>
+                        {row(t.backupHealthLastSync, settings.scriptUrl ? (syncStatus === "synced" && lastSynced ? lastSynced : (syncStatus === "syncing" ? "…" : syncStatus === "error" ? "error" : "—")) : "—", syncColor)}
+                        {row(t.backupHealthLastSnapshot, settings.scriptUrl ? formatAgo(lastAutoSnapshot) : "—", snapColor)}
+                        {row(t.backupHealthLastManual, formatAgo(lastManualBackup), manualColor)}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "6px 0" }}>
+                          <span style={{ fontFamily: font.mono, fontSize: 11, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.5 }}>{t.backupHealthTotalCards}</span>
+                          <span style={{ fontFamily: font.mono, fontSize: 12, color: T.text, fontVariantNumeric: "tabular-nums" }}>{cards.length}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                    <button
+                      onClick={exportBackupToFile}
+                      style={{
+                        padding: "11px 24px", background: "transparent",
+                        border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                        color: T.textSecondary, fontFamily: font.body, fontSize: 13, fontWeight: 500,
+                        cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                      </svg>
+                      {t.exportBackup}
+                    </button>
+                    <button
+                      onClick={() => importFileRef.current && importFileRef.current.click()}
+                      style={{
+                        padding: "11px 24px", background: "transparent",
+                        border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                        color: T.textSecondary, fontFamily: font.body, fontSize: 13, fontWeight: 500,
+                        cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                      </svg>
+                      {t.importBackup}
+                    </button>
+                    {settings.scriptUrl && (
+                      <button
+                        onClick={() => { setShowSnapshotPicker(true); loadSnapshotList(); }}
+                        style={{
+                          padding: "11px 24px", background: "transparent",
+                          border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                          color: T.textSecondary, fontFamily: font.body, fontSize: 13, fontWeight: 500,
+                          cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
+                          transition: "all 0.15s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 12a9 9 0 1 0 9-9 9.74 9.74 0 0 0-6.74 2.74L3 8"/><polyline points="3 3 3 8 8 8"/>
+                        </svg>
+                        {t.restoreFromSnapshot}
+                      </button>
+                    )}
+                    <input ref={importFileRef} type="file" accept=".json,application/json" style={{ display: "none" }}
+                      onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) importBackupFromFile(f); e.target.value = ""; }}
+                    />
+                  </div>
+                </div>
+                <div style={{ height: 1, background: T.border }} />
+                <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                       {syncStatus === "syncing"
@@ -4587,8 +5480,11 @@ export default function VocabApp() {
                       </span>
                     )}
                   </div>
-                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12, lineHeight: 1.5 }}>
+                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 8, lineHeight: 1.5 }}>
                     {t.sheetsSyncDesc}
+                  </div>
+                  <div style={{ fontFamily: font.body, fontSize: 12, color: T.warning, marginBottom: 12, lineHeight: 1.5 }}>
+                    {t.sheetsSyncWarn}
                   </div>
                   {syncStatus === "error" && (
                     <div style={{ background: T.dangerBg, border: `1px solid rgba(196,72,62,0.15)`, borderRadius: T.radiusSm, padding: "10px 14px", marginBottom: 12, fontFamily: font.mono, fontSize: 11, color: T.danger }}>
@@ -4785,11 +5681,6 @@ export default function VocabApp() {
             { id: "words", label: t.words, badge: null, icon: (active) => (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 6s-2-2-4-2-5 2-5 2v14s3-2 5-2 4 2 4 2c1.333-1.333 2.667-2 4-2 1.333 0 3 .667 5 2V6c-2-1.333-3.667-2-5-2-1.333 0-2.667.667-4 2z"/><path strokeLinecap="round" d="M12 6v14"/>
-              </svg>
-            )},
-            { id: "chat", label: t.chat, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8.82388455,18.5880577 L4,21 L4.65322944,16.4273939 C3.00629211,15.0013 2,13.0946628 2,11 C2,6.581722 6.4771525,3 12,3 C17.5228475,3 22,6.581722 22,11 C22,15.418278 17.5228475,19 12,19 C10.8897425,19 9.82174472,18.8552518 8.82388455,18.5880577 Z"/>
               </svg>
             )},
             { id: "heatmap", label: t.progress, badge: null, icon: (active) => (
