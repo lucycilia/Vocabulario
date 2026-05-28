@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -101,7 +101,6 @@ const FSRS = {
     suspended: false,
     created: localDateStr(),
     modifiedAt: Date.now(),
-    suspended: false,
   }),
   // Review a card with a grade (1=Forgot, 2=Hard, 3=Good, 4=Easy)
   review: (card, grade) => {
@@ -260,9 +259,10 @@ const stageColors = {
   young: { bg: "rgba(245,158,11,0.1)", text: "#D97706", darkText: "#FBBF24" },
   mature: { bg: "rgba(45,106,79,0.1)", text: "#2D6A4F", darkText: "#6FCF97" },
   mastered: { bg: "rgba(139,92,246,0.1)", text: "#7C3AED", darkText: "#A78BFA" },
+  suspended: { bg: "rgba(120,120,120,0.12)", text: "#707070", darkText: "#909090" },
 };
 const stageLabel = (stage) => {
-  const map = { new: "stageNew", learning: "stageLearning", young: "stageYoung", mature: "stageMature", mastered: "stageMastered" };
+  const map = { new: "stageNew", learning: "stageLearning", young: "stageYoung", mature: "stageMature", mastered: "stageMastered", suspended: "stageSuspended" };
   return t[map[stage]] || stage;
 };
 // ─── Import Parsers ───
@@ -1077,8 +1077,8 @@ const themes = {
     textPlaceholder: "#BBBBBB",
     accent: "#1A1A1A",
     accentSoft: "rgba(26,26,26,0.06)",
-    keyword: "#2D6A4F",
-    keywordBg: "rgba(45,106,79,0.08)",
+    keyword: "#2F6296",
+    keywordBg: "rgba(47,98,150,0.10)",
     success: "#2D6A4F",
     danger: "#C4483E",
     dangerBg: "rgba(196,72,62,0.06)",
@@ -1107,8 +1107,8 @@ const themes = {
     textPlaceholder: "#505050",
     accent: "#F0F0F0",
     accentSoft: "rgba(255,255,255,0.08)",
-    keyword: "#6FCF97",
-    keywordBg: "rgba(111,207,151,0.12)",
+    keyword: "#7CB0E0",
+    keywordBg: "rgba(124,176,224,0.14)",
     success: "#6FCF97",
     danger: "#F28B82",
     dangerBg: "rgba(242,139,130,0.1)",
@@ -1130,6 +1130,7 @@ const font = {
   display: "'Helvetica Neue', Helvetica, Arial, sans-serif",
   body: "'Helvetica Neue', Helvetica, Arial, sans-serif",
   mono: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+  serif: "'Fraunces', 'Source Serif Pro', Georgia, 'Times New Roman', serif",
 };
 // ─── i18n ───
 const i18n = {
@@ -1258,6 +1259,7 @@ const i18n = {
     stageYoung: "Jovem",
     stageMature: "Maduro",
     stageMastered: "Dominado",
+    stageSuspended: "Suspenso",
     stageBreakdown: "Progresso por estágio",
     recallRate: "Taxa de retenção",
     recallStrong: "Forte",
@@ -1432,6 +1434,7 @@ const i18n = {
     stageYoung: "Young",
     stageMature: "Mature",
     stageMastered: "Mastered",
+    stageSuspended: "Suspended",
     stageBreakdown: "Progress by stage",
     recallRate: "Recall rate",
     recallStrong: "Strong",
@@ -1747,7 +1750,7 @@ const phraseToHtml = (phrase, spans, escapeFn) => {
   return html;
 };
 // ─── Phrase Display ───
-function PhraseDisplay({ phrase, spans, keywordStart, keywordEnd, size = "normal" }) {
+function PhraseDisplay({ phrase, spans, keywordStart, keywordEnd, size = "normal", mobile = false }) {
   if (!phrase) return null;
   // Resolve spans: new prop wins, otherwise fall back to legacy single-span props.
   let effective = Array.isArray(spans) ? spans : null;
@@ -1755,10 +1758,17 @@ function PhraseDisplay({ phrase, spans, keywordStart, keywordEnd, size = "normal
       keywordStart !== undefined && keywordEnd !== undefined && keywordStart !== keywordEnd) {
     effective = [[keywordStart, keywordEnd]];
   }
-  const fs = size === "large" ? 20 : size === "practice" ? 24 : 14;
-  const textColor = size === "practice" ? T.text : T.textSecondary;
-  const boldStyle = { color: T.keyword, fontWeight: 700, background: T.keywordBg, padding: "2px 4px", borderRadius: 4 };
-  const wrap = { fontSize: fs, lineHeight: 1.7, fontFamily: font.body, fontWeight: 400 };
+  const isHero = size === "hero";
+  const fs = isHero ? (mobile ? 32 : 56) : size === "large" ? 20 : size === "practice" ? 24 : 14;
+  const textColor = isHero || size === "practice" ? T.text : T.textSecondary;
+  const fontFamily = isHero ? font.serif : font.body;
+  const fontWeight = isHero ? 600 : 400;
+  const lineHeight = isHero ? 1.15 : 1.7;
+  const letterSpacing = isHero ? "-0.01em" : "normal";
+  const boldStyle = isHero
+    ? { color: T.keyword, fontWeight: 700, background: T.keywordBg, padding: "0 0.12em", borderRadius: 6 }
+    : { color: T.keyword, fontWeight: 700, background: T.keywordBg, padding: "2px 4px", borderRadius: 4 };
+  const wrap = { fontSize: fs, lineHeight, fontFamily, fontWeight, letterSpacing };
   if (!effective || effective.length === 0) {
     return <span style={wrap}><span style={{ color: textColor }}>{phrase}</span></span>;
   }
@@ -1817,6 +1827,56 @@ function UnsuspendIcon({ size = 18, color = T.textTertiary }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+// Phase-of-moon icon: visual indicator for the FSRS rating scale.
+// fill 0 → empty circle, 0.5 → half-filled, 1 → fully filled.
+function MoonShapeIcon({ fill = 0, size = 18, color = T.text }) {
+  return (
+    <div
+      style={{
+        width: size, height: size, borderRadius: "50%",
+        border: `1.5px solid ${color}`, overflow: "hidden",
+        position: "relative", boxSizing: "border-box",
+        flexShrink: 0, display: "inline-block",
+      }}
+    >
+      {fill > 0 && (
+        <div
+          style={{
+            position: "absolute", left: 0, top: 0,
+            width: `${fill * 100}%`, height: "100%",
+            background: color,
+          }}
+        />
+      )}
+    </div>
+  );
+}
+function SkipForwardIcon({ size = 18, color = T.text }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="5,4 15,12 5,20" fill={color} stroke={color} />
+      <line x1="18.5" y1="5" x2="18.5" y2="19" />
+    </svg>
+  );
+}
+function XMarkIcon({ size = 18, color = T.text }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round">
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
+    </svg>
+  );
+}
+function RefreshIcon({ size = 18, color = T.text }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+      <path d="M3 21v-5h5" />
     </svg>
   );
 }
@@ -1936,7 +1996,7 @@ function AddCardForm({ onAdd, onCancel }) {
   );
 }
 // ─── Drawing Canvas ───
-const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, ref) {
+const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200, onDrawingChange }, ref) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
   const mobile = useIsMobile();
@@ -1947,6 +2007,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (onDrawingChange) onDrawingChange(false);
     },
   }));
 
@@ -1978,6 +2039,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineWidth = 1.5 + (e.pressure || 0.5) * 3;
+    if (onDrawingChange) onDrawingChange(true);
   };
 
   const onPointerMove = (e) => {
@@ -1999,6 +2061,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (onDrawingChange) onDrawingChange(false);
   };
 
   return (
@@ -2032,8 +2095,10 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200 }, r
   );
 }));
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode = "type", setAnswerMode }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode: answerModeProp = "type", setAnswerMode }) {
   const mobile = useIsMobile();
+  // Drawing/"escrever" mode is desktop-only; mobile is always type mode.
+  const answerMode = mobile ? "type" : answerModeProp;
   const [flipped, setFlipped] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -2043,17 +2108,10 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
   const [userAnswer, setUserAnswer] = useState("");
   const [score, setScore] = useState(null);
   const [hasRevealed, setHasRevealed] = useState(false);
+  const [hasDrawing, setHasDrawing] = useState(false);
   const drawRef = useRef(null);
   const ptRef = useRef(null);
   const enRef = useRef(null);
-  const frontRef = useRef(null);
-  const backRef = useRef(null);
-  const [contentHeight, setContentHeight] = useState(0);
-  useLayoutEffect(() => {
-    const fh = frontRef.current?.offsetHeight || 0;
-    const bh = backRef.current?.offsetHeight || 0;
-    setContentHeight(Math.max(fh, bh));
-  }, [card.id, studyDirection, hasRevealed, answerMode]);
   const handleCheck = (e) => {
     if (e) e.stopPropagation();
     const s = computeScore(userAnswer, card, studyDirection);
@@ -2116,369 +2174,411 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
   };
   const intervals = previewIntervals(card);
   const qualityButtons = [
-    { q: 0, label: t.skip, emoji: "⏭️", color: T.textTertiary },
-    { q: 1, label: t.forgot, emoji: "❌", color: T.danger, days: intervals[0] },
-    { q: 2, label: t.partiallyRecalled, emoji: "😬", color: T.warning, days: intervals[1] },
-    { q: 3, label: t.recalledWithEffort, emoji: "😄", color: T.success, days: intervals[2] },
-    { q: 4, label: t.easilyRecalled, emoji: "👑", color: T.textSecondary, days: intervals[3] },
+    { q: 0, label: t.skip, icon: <SkipForwardIcon size={20} color={T.text} />, days: null },
+    { q: 1, label: t.forgot, icon: <XMarkIcon size={20} color={T.text} />, days: intervals[0] },
+    { q: 2, label: t.partiallyRecalled, icon: <MoonShapeIcon fill={0.5} size={18} color={T.text} />, days: intervals[1] },
+    { q: 3, label: t.recalledWithEffort, icon: <MoonShapeIcon fill={0.78} size={18} color={T.text} />, days: intervals[2] },
+    { q: 4, label: t.easilyRecalled, icon: <MoonShapeIcon fill={1} size={18} color={T.text} />, days: intervals[3] },
   ];
+  // Which side of the card shows Portuguese (the side that gets the audio button)
+  const showingPortuguese = flipped ? studyDirection === "en-pt" : studyDirection === "pt-en";
+  const heroText = (() => {
+    if (showingPortuguese) {
+      if (card.phrase) {
+        return (
+          <PhraseDisplay
+            phrase={card.phrase}
+            spans={card.keywordSpans}
+            keywordStart={card.keywordStart}
+            keywordEnd={card.keywordEnd}
+            size="hero"
+            mobile={mobile}
+          />
+        );
+      }
+      return (
+        <span style={{
+          fontFamily: font.serif, fontSize: mobile ? 32 : 56, fontWeight: 600,
+          color: T.text, lineHeight: 1.15, letterSpacing: "-0.01em",
+        }}>
+          {card.word}
+        </span>
+      );
+    }
+    return (
+      <span style={{
+        fontFamily: font.serif, fontSize: mobile ? 32 : 56, fontWeight: 600,
+        color: T.text, lineHeight: 1.15, letterSpacing: "-0.01em",
+      }}>
+        {card.translation}
+      </span>
+    );
+  })();
+  const pillStyle = (active) => ({
+    padding: "0 20px",
+    height: 36,
+    background: T.bgCard,
+    border: `1px solid ${active ? T.text : T.border}`,
+    borderRadius: 9999,
+    color: active ? T.text : T.textSecondary,
+    fontFamily: font.body, fontSize: mobile ? 11 : 12, fontWeight: 500,
+    letterSpacing: 0.5,
+    cursor: "pointer",
+    transition: "all 0.15s",
+    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7,
+    whiteSpace: "nowrap",
+  });
+  const circleIconStyle = {
+    width: 36, height: 36, borderRadius: "50%",
+    background: T.bgCard,
+    border: `1px solid ${T.border}`,
+    cursor: "pointer",
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    transition: "all 0.15s",
+    flexShrink: 0,
+  };
+  const onCircleEnter = (e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; };
+  const onCircleLeave = (e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; };
   return (
     <div style={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(-16px)" : "translateY(0)", transition: "all 0.28s ease" }}>
-      <div
-        onClick={() => {
-          if (editing) return;
-          if (answerMode === "type" && !hasRevealed) return;
-          // Only the very first reveal happens by clicking the card. After that,
-          // every flip — back or forward — must use the flip button (top-left).
-          if (!hasRevealed) { setFlipped(true); setHasRevealed(true); }
-        }}
-        style={{
-          position: "relative",
-          background: T.bgCard,
-          border: `1px solid ${T.border}`,
-          borderRadius: T.radius,
-          padding: mobile ? "40px 24px 32px" : "56px 40px",
-          cursor: editing ? "default" : (answerMode === "type" && !hasRevealed) ? "default" : "pointer",
-          minHeight: mobile ? 520 : 420,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-          transition: "all 0.3s",
-        }}
-      >
-        {!editing && !hasRevealed && setAnswerMode && !mobile && (
+      {editing ? (
+        <div style={{ maxWidth: 600, margin: "0 auto", padding: mobile ? "16px 0" : "40px 0", textAlign: "left" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 8 }}>
+            {t.portuguese}
+          </div>
           <div
-            onClick={(e) => e.stopPropagation()}
+            ref={ptRef}
+            contentEditable
+            suppressContentEditableWarning
+            dangerouslySetInnerHTML={{ __html: editPt }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
             style={{
-              position: "absolute", top: 12, left: 12,
-              display: "inline-flex", background: T.bgInput, borderRadius: T.radiusSm, padding: 3,
+              padding: "12px 14px", background: T.bgInput, border: `1px solid ${T.border}`,
+              borderRadius: T.radiusSm, color: T.text, fontFamily: font.body, fontSize: 17,
+              outline: "none", minHeight: 44, marginBottom: 6, lineHeight: 1.5,
+              wordBreak: "break-word", whiteSpace: "pre-wrap",
             }}
-          >
-            {[
-              { id: "type", label: t.modeType },
-              { id: "write", label: t.modeWrite },
-            ].map((opt) => (
-              <button
-                key={opt.id}
-                onClick={(e) => { e.stopPropagation(); setAnswerMode(opt.id); }}
-                style={{
-                  padding: "5px 14px",
-                  background: answerMode === opt.id ? T.bgCard : "transparent",
-                  border: "none",
-                  borderRadius: 10,
-                  fontFamily: font.mono,
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: answerMode === opt.id ? T.text : T.textTertiary,
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                  letterSpacing: 0.5,
-                }}
-                onMouseEnter={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = T.bgCardHover; }}
-                onMouseLeave={(e) => { if (answerMode !== opt.id) e.currentTarget.style.background = "transparent"; }}
-              >
-                {opt.label}
-              </button>
-            ))}
+            onFocus={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = T.border; }}
+          />
+          <div style={{ fontFamily: font.mono, fontSize: 9, color: T.textPlaceholder, marginBottom: 18 }}>
+            {t.editBoldHint}
           </div>
-        )}
-        {!editing && hasRevealed && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setFlipped((f) => !f); }}
-            aria-label="Flip card"
-            title="Flip card"
+          <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 8 }}>
+            {t.english}
+          </div>
+          <div
+            ref={enRef}
+            contentEditable
+            suppressContentEditableWarning
+            dangerouslySetInnerHTML={{ __html: editEn }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
             style={{
-              position: "absolute", top: mobile ? 10 : 14, left: mobile ? 10 : 14,
-              background: "transparent", border: "none", cursor: "pointer",
-              padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
-              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "12px 14px", background: T.bgInput, border: `1px solid ${T.border}`,
+              borderRadius: T.radiusSm, color: T.text, fontFamily: font.body, fontSize: 17,
+              outline: "none", minHeight: 44, marginBottom: 22, lineHeight: 1.5,
+              wordBreak: "break-word", whiteSpace: "pre-wrap",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-              <path d="M21 3v5h-5"/>
-              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-              <path d="M3 21v-5h5"/>
-            </svg>
-          </button>
-        )}
-        {!editing && onSuspend && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onSuspend(card.id); }}
-            aria-label={t.suspend}
-            title={t.suspend}
+            onFocus={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = T.border; }}
+          />
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={cancelEdit} style={{
+              padding: "9px 22px", background: "transparent", border: `1px solid ${T.border}`,
+              borderRadius: 9999, color: T.textSecondary, fontFamily: font.body,
+              fontSize: 13, cursor: "pointer", transition: "all 0.15s",
+            }}>
+              {t.cancel}
+            </button>
+            <button onClick={saveEdit} style={{
+              padding: "9px 22px", background: T.accent, border: "none",
+              borderRadius: 9999, color: T.bg, fontFamily: font.body,
+              fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
+            }}>
+              {t.save}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ maxWidth: 1100, margin: "0 auto", width: "100%", padding: mobile ? "64px 0 0" : "96px 0 0" }}>
+          {/* Language label */}
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <span style={{
+              fontFamily: font.body, fontSize: mobile ? 10 : 11, color: T.textTertiary,
+              textTransform: "uppercase", letterSpacing: 3.5, fontWeight: 500,
+            }}>
+              {flipped
+                ? (studyDirection === "en-pt" ? t.portuguese : t.english)
+                : (studyDirection === "en-pt" ? t.english : t.portuguese)}
+            </span>
+          </div>
+          {/* Big phrase */}
+          <div
+            onClick={() => {
+              if (answerMode === "type" && !hasRevealed) return;
+              if (!hasRevealed) { setFlipped(true); setHasRevealed(true); }
+            }}
             style={{
-              position: "absolute", top: mobile ? 10 : 14, right: mobile ? 40 : 46,
-              background: "transparent", border: "none", cursor: "pointer",
-              padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
+              display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
+              padding: mobile ? "0 16px" : "0 24px",
+              cursor: (!hasRevealed && answerMode !== "type") ? "pointer" : "default",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
           >
-            <SuspendIcon size={16} color={T.textSecondary} />
-          </button>
-        )}
-        {!editing && onUpdate && (
-          <button
-            onClick={startEdit}
-            aria-label="Edit card"
-            style={{
-              position: "absolute", top: mobile ? 10 : 14, right: mobile ? 10 : 14,
-              background: "transparent", border: "none", cursor: "pointer",
-              padding: 6, borderRadius: 6, opacity: 0.4, transition: "opacity 0.15s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.4"; }}
-          >
-            <PencilIcon size={16} color={T.textSecondary} />
-          </button>
-        )}
-        {editing ? (
-          <div style={{ width: "100%", maxWidth: mobile ? "100%" : 500, textAlign: "left" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 8 }}>
-              {t.portuguese}
-            </div>
-            <div
-              ref={ptRef}
-              contentEditable
-              suppressContentEditableWarning
-              dangerouslySetInnerHTML={{ __html: editPt }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
-              style={{
-                padding: "10px 12px", background: T.bgInput, border: `1px solid ${T.border}`,
-                borderRadius: T.radiusSm, color: T.text, fontFamily: font.body, fontSize: 16,
-                outline: "none", minHeight: 40, marginBottom: 6, lineHeight: 1.5,
-                wordBreak: "break-word", whiteSpace: "pre-wrap",
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = T.border; }}
-            />
-            <div style={{ fontFamily: font.mono, fontSize: 9, color: T.textPlaceholder, marginBottom: 16 }}>
-              {t.editBoldHint}
-            </div>
-            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 8 }}>
-              {t.english}
-            </div>
-            <div
-              ref={enRef}
-              contentEditable
-              suppressContentEditableWarning
-              dangerouslySetInnerHTML={{ __html: editEn }}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) e.preventDefault(); }}
-              style={{
-                padding: "10px 12px", background: T.bgInput, border: `1px solid ${T.border}`,
-                borderRadius: T.radiusSm, color: T.text, fontFamily: font.body, fontSize: 16,
-                outline: "none", minHeight: 40, marginBottom: 20, lineHeight: 1.5,
-                wordBreak: "break-word", whiteSpace: "pre-wrap",
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = T.border; }}
-            />
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={cancelEdit} style={{
-                padding: "8px 20px", background: "transparent", border: `1px solid ${T.border}`,
-                borderRadius: T.radiusSm, color: T.textSecondary, fontFamily: font.body,
-                fontSize: 13, cursor: "pointer", transition: "all 0.15s",
-              }}>
-                {t.cancel}
-              </button>
-              <button onClick={saveEdit} style={{
-                padding: "8px 20px", background: T.accent, border: "none",
-                borderRadius: T.radiusSm, color: "#fff", fontFamily: font.body,
-                fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
-              }}>
-                {t.save}
-              </button>
+            <div style={{ maxWidth: mobile ? "100%" : 900 }}>
+              {heroText}
             </div>
           </div>
-        ) : (
-          <div style={{ position: "relative", width: "100%", minHeight: contentHeight }}>
-            <div ref={frontRef} style={{ position: "absolute", top: 0, left: 0, right: 0, visibility: flipped ? "hidden" : "visible", pointerEvents: flipped ? "none" : "auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
-                {studyDirection === "en-pt" ? t.english : t.portuguese}
-              </div>
-              {studyDirection === "en-pt" ? (
-                <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                  {card.translation}
-                </div>
-              ) : (
-                <>
-                  {card.phrase ? (
-                    <div style={{ maxWidth: mobile ? "100%" : 760 }}>
-                      <PhraseDisplay phrase={card.phrase} spans={card.keywordSpans} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
-                    </div>
-                  ) : (
-                    <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                      {card.word}
-                    </div>
-                  )}
+          {/* Action button row */}
+          <div style={{
+            display: "flex", justifyContent: "center", alignItems: "center", gap: 8,
+            marginTop: 64, marginBottom: 28,
+            minHeight: 36, flexWrap: "wrap", padding: "0 16px",
+          }}>
+            {!hasRevealed ? (
+              <>
+                {!mobile && setAnswerMode && [
+                  { id: "type", label: t.modeType },
+                  { id: "write", label: t.modeWrite },
+                ].map(opt => (
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
-                    style={{
-                      marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
-                      borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
-                      fontFamily: font.body, fontSize: 13, cursor: "pointer",
-                      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
+                    key={opt.id}
+                    onClick={() => setAnswerMode(opt.id)}
+                    style={pillStyle(answerMode === opt.id)}
+                    onMouseEnter={(e) => {
+                      if (answerMode !== opt.id) {
+                        e.currentTarget.style.borderColor = T.borderStrong;
+                        e.currentTarget.style.background = T.bgCardHover;
+                      } else {
+                        e.currentTarget.style.background = T.bgCardHover;
+                      }
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = T.bgCard;
+                      if (answerMode !== opt.id) e.currentTarget.style.borderColor = T.border;
+                    }}
                   >
-                    {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
-                    {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
+                    {opt.label.toLowerCase()}
                   </button>
-                </>
-              )}
-              {answerMode === "type" && !hasRevealed ? (
-                <div style={{ marginTop: 24, width: "100%", maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
-                  <textarea
-                    rows={1}
-                    value={userAnswer}
-                    onChange={(e) => setUserAnswer(e.target.value)}
-                    onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && userAnswer.trim()) { e.preventDefault(); handleCheck(e); } }}
-                    placeholder={studyDirection === "en-pt" ? t.typeAnswerPt : t.typeAnswerEn}
-                    autoFocus
-                    style={{
-                      width: "100%", padding: "12px 16px", boxSizing: "border-box",
-                      background: T.accentSoft, border: `1px solid ${T.border}`,
-                      borderRadius: T.radiusSm, color: T.text,
-                      fontFamily: font.body, fontSize: 16, outline: "none",
-                      transition: "border-color 0.2s",
-                      resize: "none", overflow: "hidden",
-                    }}
-                    onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
-                    onBlur={(e) => { e.target.style.borderColor = T.border; }}
-                  />
+                ))}
+                {studyDirection === "pt-en" && (
                   <button
-                    onClick={handleCheck}
-                    disabled={!userAnswer.trim()}
+                    onClick={() => handleSpeak(card.phrase || card.word)}
+                    style={{ ...pillStyle(isSpeaking), color: T.textSecondary, minWidth: mobile ? 158 : 184 }}
+                  >
+                    <span style={{ width: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                      {isSpeaking
+                        ? <StopIcon size={12} color={T.textSecondary} />
+                        : <span style={{ fontSize: 14, lineHeight: 1 }}>♪</span>}
+                    </span>
+                    <span>{(isSpeaking ? t.stopPronunciation : t.listenPronunciation).toLowerCase()}</span>
+                  </button>
+                )}
+                {!mobile && (onSuspend || onUpdate) && (setAnswerMode || studyDirection === "pt-en") && (
+                  <div aria-hidden style={{ width: 1, height: 20, background: T.border, margin: "0 6px" }} />
+                )}
+                {onSuspend && (
+                  <button onClick={() => onSuspend(card.id)} aria-label={t.suspend} title={t.suspend}
+                    style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}>
+                    <SuspendIcon size={15} color={T.textSecondary} />
+                  </button>
+                )}
+                {onUpdate && (
+                  <button onClick={startEdit} aria-label="Edit card"
+                    style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}>
+                    <PencilIcon size={14} color={T.textSecondary} />
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setFlipped(f => !f)} aria-label="Flip card" title="Flip card"
+                  style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}
+                >
+                  <RefreshIcon size={14} color={T.textSecondary} />
+                </button>
+                {studyDirection === "en-pt" && (
+                  <button
+                    onClick={() => handleSpeak(card.phrase || card.word)}
+                    style={{ ...pillStyle(isSpeaking), color: T.textSecondary, minWidth: mobile ? 158 : 184 }}
+                  >
+                    <span style={{ width: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                      {isSpeaking
+                        ? <StopIcon size={12} color={T.textSecondary} />
+                        : <span style={{ fontSize: 14, lineHeight: 1 }}>♪</span>}
+                    </span>
+                    <span>{(isSpeaking ? t.stopPronunciation : t.listenPronunciation).toLowerCase()}</span>
+                  </button>
+                )}
+                {!mobile && (onSuspend || onUpdate) && (
+                  <div aria-hidden style={{ width: 1, height: 20, background: T.border, margin: "0 6px" }} />
+                )}
+                {onSuspend && (
+                  <button onClick={() => onSuspend(card.id)} aria-label={t.suspend} title={t.suspend}
+                    style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}>
+                    <SuspendIcon size={15} color={T.textSecondary} />
+                  </button>
+                )}
+                {onUpdate && (
+                  <button onClick={startEdit} aria-label="Edit card"
+                    style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}>
+                    <PencilIcon size={14} color={T.textSecondary} />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {/* Mid slot: input (type/question) | drawing canvas (write) | answer comparison (type/answer) — same vertical position */}
+          <div style={{
+            maxWidth: mobile ? "100%" : 700, margin: "0 auto",
+            padding: mobile ? "0 16px" : 0,
+            minHeight: answerMode === "write" ? undefined : 64,
+          }}>
+            {answerMode === "type" && !hasRevealed && (
+              <textarea
+                rows={1}
+                value={userAnswer}
+                onChange={(e) => setUserAnswer(e.target.value)}
+                onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && userAnswer.trim()) { e.preventDefault(); handleCheck(e); } }}
+                placeholder={studyDirection === "en-pt" ? t.typeAnswerPt : t.typeAnswerEn}
+                autoFocus
+                style={{
+                  width: "100%", minHeight: 64, padding: "20px 28px", boxSizing: "border-box",
+                  background: T.bgInput,
+                  border: `1px solid ${T.border}`,
+                  borderRadius: 14, color: T.text,
+                  fontFamily: font.serif, fontSize: mobile ? 17 : 19,
+                  fontWeight: 400, fontStyle: "italic",
+                  outline: "none", resize: "none", overflow: "hidden",
+                  transition: "border-color 0.2s",
+                }}
+                onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
+                onBlur={(e) => { e.target.style.borderColor = T.border; }}
+              />
+            )}
+            {answerMode === "write" && (
+              <>
+                {hasRevealed && (
+                  <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2, marginBottom: 6 }}>
+                    {t.yourAnswer}
+                  </div>
+                )}
+                <DrawingCanvas ref={drawRef} height={mobile ? 160 : 200} onDrawingChange={setHasDrawing} />
+              </>
+            )}
+            {answerMode === "type" && hasRevealed && score !== null && (
+              <div style={{
+                minHeight: 64, padding: "20px 28px",
+                background: T.bgInput,
+                border: `1px solid ${T.border}`,
+                borderRadius: 14,
+                display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16,
+              }}>
+                <span style={{
+                  fontFamily: font.serif, fontSize: mobile ? 17 : 19,
+                  fontStyle: "italic", fontWeight: 400, color: T.text,
+                  flex: 1,
+                  lineHeight: 1.3, wordBreak: "break-word",
+                }}>
+                  {userAnswer}
+                </span>
+                <span style={{
+                  fontFamily: font.mono, fontSize: mobile ? 13 : 14, fontWeight: 600,
+                  color: score >= 90 ? T.success : score >= 70 ? T.warning : T.danger,
+                  fontVariantNumeric: "tabular-nums", flexShrink: 0,
+                }}>
+                  {score}%
+                </span>
+              </div>
+            )}
+          </div>
+          {/* Bottom slot: verify (question) OR rating buttons (answer) */}
+          <div style={{
+            maxWidth: mobile ? "100%" : 1000, margin: "28px auto 0",
+            padding: mobile ? "0 16px" : 0,
+          }}>
+            {!hasRevealed && (() => {
+              // Type mode: disabled until the user types something, then handleCheck scores + reveals.
+              // Write mode: disabled until the user has drawn something, then reveals the answer (no auto-scoring).
+              const verifyDisabled = answerMode === "type"
+                ? !userAnswer.trim()
+                : !hasDrawing;
+              const onVerify = answerMode === "type"
+                ? handleCheck
+                : () => { stopPT(); setIsSpeaking(false); setFlipped(true); setHasRevealed(true); };
+              return (
+                <div style={{ textAlign: "center" }}>
+                  <button
+                    onClick={onVerify}
+                    disabled={verifyDisabled}
                     style={{
-                      marginTop: 10, padding: "10px 28px",
-                      background: userAnswer.trim() ? T.accent : T.bgInput,
-                      border: "none", borderRadius: T.radiusSm,
-                      color: userAnswer.trim() ? "#fff" : T.textPlaceholder,
-                      fontFamily: font.body, fontSize: 14, fontWeight: 600,
-                      cursor: userAnswer.trim() ? "pointer" : "default",
+                      height: 48, padding: "0 32px",
+                      background: verifyDisabled ? "transparent" : T.accent,
+                      border: verifyDisabled ? `1px solid ${T.border}` : "none",
+                      borderRadius: 9999,
+                      color: verifyDisabled ? T.textPlaceholder : T.bg,
+                      fontFamily: font.body, fontSize: mobile ? 11 : 12, fontWeight: 500,
+                      cursor: verifyDisabled ? "default" : "pointer",
+                      letterSpacing: 2.5, textTransform: "uppercase",
                       transition: "all 0.15s",
+                      display: "inline-flex", alignItems: "center", gap: 10,
                     }}
+                    onMouseEnter={(e) => { if (!verifyDisabled) e.currentTarget.style.opacity = "0.88"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
                   >
                     {t.check}
+                    <span style={{ fontSize: 14, lineHeight: 1, letterSpacing: 0 }}>→</span>
                   </button>
                 </div>
-              ) : null}
-            </div>
-            <div ref={backRef} style={{ position: "absolute", top: 0, left: 0, right: 0, visibility: flipped ? "visible" : "hidden", pointerEvents: flipped ? "auto" : "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ fontFamily: font.mono, fontSize: 10, color: T.keyword, textTransform: "uppercase", letterSpacing: 2.5, marginBottom: 20 }}>
-                {studyDirection === "en-pt" ? t.portuguese : t.english}
-              </div>
-              {studyDirection === "en-pt" ? (
-                <>
-                  {card.phrase ? (
-                    <div style={{ maxWidth: mobile ? "100%" : 760 }}>
-                      <PhraseDisplay phrase={card.phrase} spans={card.keywordSpans} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="practice" />
-                    </div>
-                  ) : (
-                    <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                      {card.word}
-                    </div>
-                  )}
+              );
+            })()}
+            {hasRevealed && (
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(5, 1fr)",
+                gap: mobile ? 8 : 12,
+              }}>
+                {qualityButtons.map((btn) => (
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleSpeak(card.phrase || card.word); }}
+                    key={btn.q}
+                    onClick={() => handleReview(btn.q)}
                     style={{
-                      marginTop: 24, background: isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft, border: `1px solid ${isSpeaking ? T.danger : T.border}`,
-                      borderRadius: 24, padding: "9px 22px", color: isSpeaking ? T.danger : T.textSecondary,
-                      fontFamily: font.body, fontSize: 13, cursor: "pointer",
-                      display: "flex", alignItems: "center", gap: 8, transition: "all 0.15s",
+                      padding: mobile ? "14px 8px" : "20px 12px",
+                      background: T.bgCard,
+                      border: `1px solid ${T.border}`,
+                      borderRadius: 14,
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                      display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+                      minHeight: mobile ? 92 : 108,
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.borderStrong; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.12)") : T.bgCardHover; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = isSpeaking ? T.danger : T.border; e.currentTarget.style.background = isSpeaking ? (T.dangerSoft || "rgba(220,50,50,0.08)") : T.accentSoft; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; }}
                   >
-                    {isSpeaking ? <StopIcon size={16} color={T.danger} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
-                    {isSpeaking ? t.stopPronunciation : t.listenPronunciation}
+                    <div style={{ height: 22, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
+                      {btn.icon}
+                    </div>
+                    <span style={{
+                      fontFamily: font.body, fontSize: mobile ? 13 : 14, fontWeight: 500,
+                      color: T.text, lineHeight: 1.2, textAlign: "center",
+                    }}>
+                      {btn.label}
+                    </span>
+                    {btn.days != null && (
+                      <span style={{
+                        fontFamily: font.mono, fontSize: 10, color: T.textTertiary,
+                        lineHeight: 1.2, textAlign: "center",
+                        letterSpacing: 0.3, fontVariantNumeric: "tabular-nums",
+                      }}>
+                        {formatFutureDate(btn.days)}
+                      </span>
+                    )}
                   </button>
-                </>
-              ) : (
-                <div style={{ fontFamily: font.display, fontSize: 24, fontWeight: 400, color: T.text, lineHeight: 1.4, maxWidth: mobile ? "100%" : 760 }}>
-                  {card.translation}
-                </div>
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      {!editing && answerMode === "write" && (
-        <div style={{ marginTop: 16, width: "100%" }}>
-          {hasRevealed && (
-            <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 2, marginBottom: 6 }}>
-              {t.yourAnswer}
-            </div>
-          )}
-          <DrawingCanvas ref={drawRef} height={mobile ? 160 : 200} />
-        </div>
-      )}
-      {hasRevealed && !editing && score !== null && (
-        <div style={{
-          marginTop: 16, padding: "14px 18px",
-          background: T.bgInput, borderRadius: T.radiusSm,
-          width: "100%", maxWidth: mobile ? "100%" : 500,
-          marginLeft: "auto", marginRight: "auto", boxSizing: "border-box",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontFamily: font.mono, fontSize: 12, color: T.textTertiary }}>
-              {t.yourAnswer}
-            </span>
-            <span style={{
-              fontFamily: font.mono, fontSize: 16, fontWeight: 700,
-              color: score >= 90 ? T.success : score >= 70 ? T.warning : T.danger,
-            }}>
-              {score}%
-            </span>
-          </div>
-          <div style={{
-            fontFamily: font.body, fontSize: 18, color: T.text, marginTop: 8,
-            opacity: score < 70 ? 0.6 : 1,
-          }}>
-            {userAnswer}
-          </div>
-        </div>
-      )}
-      {hasRevealed && !editing && (
-        <div style={{ display: "flex", flexWrap: mobile ? "wrap" : "nowrap", gap: 8, marginTop: 16 }}>
-          {qualityButtons.map((btn) => (
-            <button
-              key={btn.q}
-              onClick={() => handleReview(btn.q)}
-              style={{
-                flex: mobile ? "1 1 28%" : 1,
-                padding: mobile ? "10px 4px 8px" : "14px 6px 12px",
-                background: T.bgCard,
-                border: `1px solid ${T.border}`,
-                borderRadius: T.radiusSm,
-                cursor: "pointer",
-                transition: "all 0.15s",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 6,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
-            >
-              <span style={{ fontSize: 22 }}>{btn.emoji}</span>
-              <span style={{ fontFamily: font.body, fontSize: 11, fontWeight: 500, color: T.textSecondary, lineHeight: 1.2, textAlign: "center" }}>
-                {btn.label}
-              </span>
-              {btn.days != null && (
-                <span style={{ fontFamily: font.mono, fontSize: 9, color: T.textTertiary, lineHeight: 1.2, textAlign: "center" }}>
-                  {formatFutureDate(btn.days)}
-                </span>
-              )}
-            </button>
-          ))}
         </div>
       )}
     </div>
@@ -2566,18 +2666,13 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
           zIndex: menuOpen ? 20 : "auto",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-          <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, wordBreak: "break-word" }}>
-            {(card.word || "").split(/\s*\|\s*/).map((p, i, arr) => (
-              <Fragment key={i}>
-                {i > 0 && <span style={{ color: T.textTertiary, fontWeight: 400 }}> | </span>}
-                {p}
-              </Fragment>
-            ))}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 6 }}>
+          <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 500, color: T.text, wordBreak: "break-word" }}>
+            {card.translation}
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
             {(() => {
-              const stage = getStage(card);
+              const stage = card.suspended ? "suspended" : getStage(card);
               const sc = stageColors[stage];
               const isDark = T.bg === "#0E0E0E";
               return (
@@ -2673,15 +2768,12 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                     </svg>
-                    {t.delete}
+                    {t.deleteWord}
                   </button>
                 </div>
               )}
             </div>
           </div>
-        </div>
-        <div style={{ fontFamily: font.body, fontSize: 13, color: T.textSecondary, marginBottom: 4, wordBreak: "break-word" }}>
-          {card.translation}
         </div>
         {card.phrase && (
           <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, wordBreak: "break-word" }}>
@@ -2712,7 +2804,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 2fr 90px 90px 32px",
+        gridTemplateColumns: "1fr 1fr 90px 90px 32px",
         gap: 12,
         alignItems: "start",
         padding: "10px 20px",
@@ -2726,18 +2818,10 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
       onMouseEnter={(e) => (e.currentTarget.style.background = T.bgCardHover)}
       onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; setMenuOpen(false); }}
     >
-      <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 700, color: T.keyword, padding: "6px 0", wordBreak: "break-word" }}>
-        {(card.word || "").split(/\s*\|\s*/).map((p, i, arr) => (
-          <Fragment key={i}>
-            {i > 0 && <span style={{ color: T.textTertiary, fontWeight: 400 }}> | </span>}
-            {p}
-          </Fragment>
-        ))}
-      </span>
       <EditableCell html={toEnHtml()} onCommit={commitEn} style={cellStyle} />
       <EditableCell html={toPtHtml()} onCommit={commitPt} style={cellStyle} />
       {(() => {
-        const stage = getStage(card);
+        const stage = card.suspended ? "suspended" : getStage(card);
         const sc = stageColors[stage];
         const isDark = T.bg === "#0E0E0E";
         return (
@@ -2892,7 +2976,7 @@ function Modal({ open, onClose, title, children }) {
       <button
         onClick={onClose}
         style={{
-          position: "fixed", top: mobile ? 12 : 20, right: mobile ? 12 : `max(20px, calc((100vw - 1100px) / 2 + 32px))`, zIndex: 110,
+          position: "fixed", top: mobile ? 12 : 20, right: mobile ? 12 : `max(20px, calc((100vw - 1200px) / 2 + 36px))`, zIndex: 110,
           width: 44, height: 44, borderRadius: 9999,
           background: T.bgCard,
           border: `1px solid ${T.border}`,
@@ -2908,7 +2992,7 @@ function Modal({ open, onClose, title, children }) {
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       </button>
-      <div style={{ padding: mobile ? "20px 16px 60px" : "36px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 60px" : "36px 36px 60px", maxWidth: 1200, margin: "0 auto" }}>
         {title && (
           <div style={{ fontFamily: font.display, fontSize: mobile ? 20 : 24, fontWeight: 700, color: T.text, marginBottom: mobile ? 20 : 28, textTransform: "capitalize" }}>
             {title}
@@ -3515,8 +3599,8 @@ export default function VocabApp() {
   const [snapshotListError, setSnapshotListError] = useState("");
   const importFileRef = useRef(null);
   const [deletedCards, setDeletedCards] = useState({});
-  const [sortKey, setSortKey] = useState("dueDate");
-  const [sortDir, setSortDir] = useState("asc");
+  const [sortKey, setSortKey] = useState("added");
+  const [sortDir, setSortDir] = useState("desc");
   const [searchQuery, setSearchQuery] = useState("");
   const [groupByStage, setGroupByStage] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
@@ -4119,6 +4203,7 @@ export default function VocabApp() {
       else if (sortKey === "phrase") { va = (a.phrase || "").toLowerCase(); vb = (b.phrase || "").toLowerCase(); }
       else if (sortKey === "stage") { va = so[getStage(a)]; vb = so[getStage(b)]; }
       else if (sortKey === "dueDate") { va = a.dueDate || ""; vb = b.dueDate || ""; }
+      else if (sortKey === "added") { va = a.id || ""; vb = b.id || ""; }
       else { va = ""; vb = ""; }
       if (va < vb) return sortDir === "asc" ? -1 : 1;
       if (va > vb) return sortDir === "asc" ? 1 : -1;
@@ -4157,7 +4242,6 @@ export default function VocabApp() {
     );
   }
   const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
-  const practiceBadgeMobile = dueReview > 0 ? `D${dueReview}` : null;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
     { id: "words", label: t.words, badge: cards.length || null },
@@ -4166,41 +4250,47 @@ export default function VocabApp() {
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
   // Action buttons (timer, sync, settings) — same JSX rendered in two places:
   // alongside the h1 header on mobile, alongside the tab nav on desktop.
+  // Top header buttons — same outline pill / circle pattern as the practice action row
+  const headerCircleStyle = {
+    display: "flex", alignItems: "center", justifyContent: "center",
+    width: 36, height: 36, borderRadius: "50%",
+    background: T.bgCard,
+    border: `1px solid ${T.border}`,
+    cursor: "pointer", transition: "all 0.15s",
+    flexShrink: 0,
+  };
+  const headerPillStyle = (color) => ({
+    display: "flex", alignItems: "center", gap: 7,
+    padding: "0 14px", height: 36, borderRadius: 9999,
+    background: T.bgCard,
+    border: `1px solid ${T.border}`,
+    cursor: "pointer", transition: "all 0.15s",
+    fontFamily: font.mono,
+    fontSize: mobile ? 11 : 12,
+    color: color || T.textSecondary,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: 0.3,
+  });
+  const headerOnEnter = (e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; };
+  const headerOnLeave = (e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; };
   const headerActions = (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       <button
         onClick={activeSession ? stopTimer : startTimer}
         title={activeSession ? t.stopTimer : t.startTimer}
-        style={activeSession ? {
-          display: "flex", alignItems: "center", gap: 7,
-          padding: "0 12px", height: 34, borderRadius: 9999,
-          background: T.dangerBg,
-          border: `1px solid rgba(196,72,62,0.2)`,
-          cursor: "pointer", transition: "all 0.2s",
-          fontFamily: font.mono,
-          fontSize: mobile ? 10 : 11,
-          color: T.danger,
-          fontVariantNumeric: "tabular-nums",
-          letterSpacing: 0.3,
-        } : {
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: 34, height: 34, borderRadius: 9999,
-          background: T.accentSoft,
-          border: `1px solid ${T.border}`,
-          cursor: "pointer", transition: "all 0.2s",
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+        style={activeSession ? headerPillStyle(T.success) : headerCircleStyle}
+        onMouseEnter={headerOnEnter}
+        onMouseLeave={headerOnLeave}
       >
         {activeSession ? (
           <>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden>
-              <rect x="6" y="6" width="12" height="12" rx="1.5" />
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.success} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <polyline points="20 6 9 17 4 12"/>
             </svg>
             <span>{formatDuration(liveElapsed)}</span>
           </>
         ) : (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill={T.textTertiary} stroke="none" aria-hidden>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill={T.textSecondary} stroke="none" aria-hidden>
             <polygon points="7,5 19,12 7,19" />
           </svg>
         )}
@@ -4209,19 +4299,12 @@ export default function VocabApp() {
         onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
         disabled={syncStatus === "syncing"}
         title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
-        style={{
-          display: "flex", alignItems: "center", gap: 7,
-          padding: "0 12px", height: 34, borderRadius: 9999,
-          background: syncStatus === "synced" ? T.keywordBg : syncStatus === "error" ? T.dangerBg : T.accentSoft,
-          border: `1px solid ${syncStatus === "synced" ? "rgba(45,106,79,0.2)" : syncStatus === "error" ? "rgba(196,72,62,0.2)" : T.border}`,
-          cursor: syncStatus === "syncing" ? "default" : "pointer",
-          transition: "all 0.2s",
-        }}
-        onMouseEnter={(e) => { if (syncStatus !== "syncing") e.currentTarget.style.opacity = "0.8"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+        style={headerPillStyle(syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textSecondary)}
+        onMouseEnter={(e) => { if (syncStatus !== "syncing") headerOnEnter(e); }}
+        onMouseLeave={headerOnLeave}
       >
         {syncStatus === "syncing" ? (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
             <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
             <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
           </svg>
@@ -4235,28 +4318,22 @@ export default function VocabApp() {
             <circle cx="12" cy="12" r="10"/>
           </svg>
         ) : (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2.5" strokeLinecap="round">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2.5" strokeLinecap="round">
             <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
             <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
           </svg>
         )}
-        <span style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: 0.3, color: syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textTertiary }}>
+        <span>
           {syncStatus === "syncing" ? t.sheetsSyncing : syncStatus === "synced" ? (lastSynced || t.sheetsSynced) : syncStatus === "error" ? t.sheetsError : "sync"}
         </span>
       </button>
       <button
         onClick={() => setShowSettingsModal(true)}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: 34, height: 34, borderRadius: 9999,
-          background: T.accentSoft,
-          border: `1px solid ${T.border}`,
-          cursor: "pointer", transition: "all 0.2s",
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.8"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
+        style={headerCircleStyle}
+        onMouseEnter={headerOnEnter}
+        onMouseLeave={headerOnLeave}
       >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </button>
@@ -4278,35 +4355,35 @@ export default function VocabApp() {
         .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-      <div style={{ padding: mobile ? "20px 16px 0" : "36px 32px 0", maxWidth: 1100, margin: "0 auto" }}>
-        <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h1 style={{ fontFamily: font.display, fontSize: 28, fontWeight: 700, color: T.text, margin: 0, letterSpacing: -0.5, textTransform: "capitalize" }}>
-            vocabulário
-          </h1>
-          {mobile && headerActions}
-        </div>
+      <div style={{ padding: mobile ? "16px 16px 0" : "28px 36px 0", maxWidth: 1200, margin: "0 auto" }}>
+        {mobile && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            {headerActions}
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, borderBottom: `1px solid ${T.border}` }}>
-        <div className="nav-scroll" style={{ display: mobile ? "none" : "flex", gap: 0, overflowX: "auto", WebkitOverflowScrolling: "touch", flex: 1, minWidth: 0 }}>
+        <div className="nav-scroll" style={{ display: mobile ? "none" : "flex", gap: 28, overflowX: "auto", WebkitOverflowScrolling: "touch", flex: 1, minWidth: 0 }}>
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setView(item.id)}
               style={{
-                padding: mobile ? "10px 14px" : "12px 20px",
+                padding: mobile ? "10px 14px" : "10px 0 12px 0",
                 background: "none",
                 border: "none",
-                borderBottom: view === item.id ? `2px solid ${T.accent}` : "2px solid transparent",
+                borderBottom: view === item.id ? `4px solid ${T.text}` : "4px solid transparent",
+                marginBottom: -1,
                 color: view === item.id ? T.text : T.textTertiary,
                 fontFamily: font.body,
-                fontSize: mobile ? 13 : 14,
+                fontSize: mobile ? 11 : 12,
                 fontWeight: 500,
                 cursor: "pointer",
                 transition: "color 0.15s, border-color 0.15s",
                 display: "flex",
-                alignItems: "center",
-                gap: 6,
-                letterSpacing: 0.2,
-                textTransform: "capitalize",
+                alignItems: "baseline",
+                gap: 10,
+                letterSpacing: 2.5,
+                textTransform: "uppercase",
                 whiteSpace: "nowrap",
                 flexShrink: 0,
               }}
@@ -4316,10 +4393,12 @@ export default function VocabApp() {
               {item.label}
               {item.badge && (
                 <span style={{
-                  background: view === item.id ? T.accent : T.accentSoft,
-                  color: view === item.id ? T.bg : T.textTertiary,
-                  fontFamily: font.mono, fontSize: 10, fontWeight: 500,
-                  padding: "2px 7px", borderRadius: 9999,
+                  fontFamily: font.mono,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: view === item.id ? T.textSecondary : T.textPlaceholder,
+                  letterSpacing: 0.5,
+                  fontVariantNumeric: "tabular-nums",
                 }}>
                   {item.badge}
                 </span>
@@ -4328,13 +4407,13 @@ export default function VocabApp() {
           ))}
         </div>
         {!mobile && (
-          <div style={{ paddingBottom: 8 }}>
+          <div style={{ paddingBottom: 6 }}>
             {headerActions}
           </div>
         )}
         </div>
       </div>
-      <div style={{ padding: mobile ? "20px 16px 100px" : "32px 32px 60px", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "20px 16px 100px" : "32px 36px 60px", maxWidth: 1200, margin: "0 auto" }}>
         {view === "practice" && (
           <>
             {dueCards.length === 0 ? (
@@ -4367,19 +4446,7 @@ export default function VocabApp() {
                 )}
               </div>
             ) : (
-              <>
-                <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} setAnswerMode={setAnswerMode} />
-                {mobile && (dueReview > 0 || dueNew > 0) && (
-                  <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
-                    <span style={{
-                      fontFamily: font.mono, fontSize: 11, fontWeight: 600,
-                      color: T.textTertiary, letterSpacing: 0.5,
-                    }}>
-                      {dueReview > 0 ? `D${dueReview}` : ""}{dueReview > 0 && dueNew > 0 ? " | " : ""}{dueNew > 0 ? `N${dueNew}` : ""}
-                    </span>
-                  </div>
-                )}
-              </>
+              <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} setAnswerMode={setAnswerMode} />
             )}
           </>
         )}
@@ -4408,21 +4475,26 @@ export default function VocabApp() {
                 />
               </div>
               <button
-                onClick={() => { setGroupByStage(prev => !prev); setCollapsedGroups(new Set()); }}
+                onClick={() => {
+                  const next = !groupByStage;
+                  setGroupByStage(next);
+                  // Turning grouping on collapses every accordion by default.
+                  setCollapsedGroups(next ? new Set(["new", "learning", "young", "mature", "mastered", "suspended"]) : new Set());
+                }}
                 style={{
-                  padding: mobile ? "0 14px" : "9px 14px",
-                  height: mobile ? 36 : undefined,
+                  padding: mobile ? "0 16px" : "0 18px",
+                  height: 40,
                   marginLeft: mobile ? 0 : "auto",
-                  background: groupByStage ? T.accent : "transparent",
-                  border: `1px solid ${groupByStage ? T.accent : T.border}`,
-                  borderRadius: T.radiusSm,
-                  color: groupByStage ? T.bg : T.textSecondary,
+                  background: T.bgCard,
+                  border: `1px solid ${groupByStage ? T.text : T.border}`,
+                  borderRadius: 9999,
+                  color: groupByStage ? T.text : T.textSecondary,
                   fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
                   display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
                   transition: "all 0.15s",
                 }}
-                onMouseEnter={(e) => { if (!groupByStage) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.accentSoft; } }}
-                onMouseLeave={(e) => { if (!groupByStage) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; } }}
+                onMouseEnter={(e) => { if (!groupByStage) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                onMouseLeave={(e) => { if (!groupByStage) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; } }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
@@ -4432,9 +4504,9 @@ export default function VocabApp() {
               <button
                 onClick={() => setShowImportInline(true)}
                 style={{
-                  padding: "9px 18px", background: T.accent,
+                  padding: "0 20px", height: 40, background: T.accent,
                   border: "none",
-                  borderRadius: T.radiusSm,
+                  borderRadius: 9999,
                   color: T.bg,
                   fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
                   display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
@@ -4458,11 +4530,10 @@ export default function VocabApp() {
               </div>
             ) : (
               <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard }}>
-                <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 2fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
+                <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
                   {[
-                    { key: null, label: t.headerPalavra },
-                    { key: null, label: t.headerEnglish },
-                    { key: null, label: t.headerPortuguese },
+                    { key: null, label: t.headerEnglish, indent: true },
+                    { key: null, label: t.headerPortuguese, indent: true },
                     { key: "stage", label: t.headerStage },
                     { key: "dueDate", label: t.headerDue },
                     { key: null, label: "" },
@@ -4485,6 +4556,7 @@ export default function VocabApp() {
                         textTransform: "uppercase", letterSpacing: 2,
                         cursor: col.key ? "pointer" : "default",
                         userSelect: "none",
+                        paddingLeft: col.indent ? 9 : 0,
                         display: "flex", alignItems: "center", gap: 6,
                         transition: "color 0.15s",
                       }}
@@ -5829,65 +5901,51 @@ export default function VocabApp() {
       {mobile && (
         <div style={{
           position: "fixed", bottom: 12, left: 12, right: 12,
-          background: settings.theme === "dark" ? "rgba(30,30,30,0.65)" : "rgba(255,255,255,0.55)",
+          background: settings.theme === "dark" ? "rgba(30,30,30,0.8)" : "rgba(255,255,255,0.82)",
           borderRadius: 9999,
-          border: `1px solid ${settings.theme === "dark" ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.6)"}`,
-          boxShadow: `0 8px 32px rgba(0,0,0,${settings.theme === "dark" ? "0.4" : "0.12"}), inset 0 1px 0 ${settings.theme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.7)"}`,
+          border: `1px solid ${settings.theme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.05)"}`,
+          boxShadow: `0 8px 32px rgba(0,0,0,${settings.theme === "dark" ? "0.4" : "0.1"})`,
           backdropFilter: "blur(24px) saturate(1.8)",
           WebkitBackdropFilter: "blur(24px) saturate(1.8)",
-          display: "flex", justifyContent: "space-around", alignItems: "center",
-          padding: "4px 4px",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: 5, gap: 2,
           zIndex: 1000,
         }}>
-          {[
-            { id: "practice", label: t.practice, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12H17V17C17 19.7614 14.7614 22 12 22H10C7.23858 22 5 19.7614 5 17V12Z"/><path d="M17 13H19C20.1046 13 21 13.8954 21 15V15C21 16.1046 20.1046 17 19 17H17"/><path d="M9 9C9 9 8 8.5 8 7C8 5.5 9 5 9 5"/><path d="M12 3C12 3 13 3.5 13 5C13 6.5 12 7 12 7"/>
-              </svg>
-            )},
-            { id: "words", label: t.words, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 6s-2-2-4-2-5 2-5 2v14s3-2 5-2 4 2 4 2c1.333-1.333 2.667-2 4-2 1.333 0 3 .667 5 2V6c-2-1.333-3.667-2-5-2-1.333 0-2.667.667-4 2z"/><path strokeLinecap="round" d="M12 6v14"/>
-              </svg>
-            )},
-            { id: "heatmap", label: t.progress, badge: null, icon: (active) => (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? T.text : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 14l8-11v7h5l-8 11v-7z"/>
-              </svg>
-            )},
-          ].map((tab) => {
-            const active = view === tab.id;
+          {navItems.map((item) => {
+            const active = view === item.id;
             return (
               <button
-                key={tab.id}
-                onClick={() => setView(tab.id)}
+                key={item.id}
+                onClick={() => setView(item.id)}
                 style={{
-                  flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-                  background: active ? (settings.theme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)") : "none", border: "none",
-                  borderRadius: 9999, padding: "6px 4px",
+                  flex: "0 1 auto", minWidth: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                  background: active ? T.text : "transparent",
+                  border: "none",
+                  borderRadius: 9999,
+                  padding: active ? "10px 16px" : "10px 10px",
                   cursor: "pointer",
+                  transition: "background 0.15s",
+                  whiteSpace: "nowrap",
                 }}
               >
-                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ flexShrink: 0, display: "flex" }}>{tab.icon(active)}</span>
-                  {tab.badge && (
-                    <span style={{
-                      background: T.text, color: T.bg,
-                      fontFamily: font.mono, fontSize: 10, fontWeight: 700,
-                      padding: "2px 6px", borderRadius: 9999, whiteSpace: "nowrap",
-                      lineHeight: 1, marginTop: 2,
-                    }}>
-                      {tab.badge}
-                    </span>
-                  )}
-                </span>
                 <span style={{
-                  fontFamily: font.body, fontSize: 9, fontWeight: active ? 700 : 500,
-                  color: active ? T.text : T.textTertiary,
-                  textTransform: "capitalize", letterSpacing: 0.2,
+                  fontFamily: font.body, fontSize: 10.5, fontWeight: 600,
+                  color: active ? T.bg : T.textTertiary,
+                  textTransform: "uppercase", letterSpacing: 1,
                 }}>
-                  {tab.label}
+                  {item.label}
                 </span>
+                {item.badge && (
+                  <span style={{
+                    fontFamily: font.mono, fontSize: 9, fontWeight: 500,
+                    color: active ? T.bg : T.textPlaceholder,
+                    opacity: active ? 0.6 : 1,
+                    letterSpacing: 0.3, fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {item.badge}
+                  </span>
+                )}
               </button>
             );
           })}
