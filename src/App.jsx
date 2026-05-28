@@ -1173,9 +1173,9 @@ const i18n = {
     exportStudyTime: "exportar tempo",
     exportStudyTimeDesc: "Baixe seu tempo de estudo como CSV (uma linha por dia).",
     skip: "Pular",
-    forgot: "Esqueci",
-    partiallyRecalled: "Parcialmente",
-    recalledWithEffort: "Com esforço",
+    forgot: "Errei",
+    partiallyRecalled: "Difícil",
+    recalledWithEffort: "Bom",
     easilyRecalled: "Fácil",
     import: "importar",
     newWord: "+ novo",
@@ -1347,10 +1347,10 @@ const i18n = {
     exportStudyTime: "export time",
     exportStudyTimeDesc: "Download your study time as CSV (one row per day).",
     skip: "Skip",
-    forgot: "Forgot",
-    partiallyRecalled: "Partially recalled",
-    recalledWithEffort: "Recalled with effort",
-    easilyRecalled: "Easily recalled",
+    forgot: "Again",
+    partiallyRecalled: "Hard",
+    recalledWithEffort: "Good",
+    easilyRecalled: "Easy",
     import: "import",
     newWord: "+ new",
     close: "close",
@@ -2147,8 +2147,6 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
           textAlign: "center",
           transition: "all 0.3s",
         }}
-        onMouseEnter={(e) => { if (!editing) e.currentTarget.style.borderColor = T.borderStrong; }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
       >
         {!editing && !hasRevealed && setAnswerMode && !mobile && (
           <div
@@ -2894,7 +2892,7 @@ function Modal({ open, onClose, title, children }) {
       <button
         onClick={onClose}
         style={{
-          position: "fixed", top: mobile ? 12 : 20, right: mobile ? 12 : 20, zIndex: 110,
+          position: "fixed", top: mobile ? 12 : 20, right: mobile ? 12 : `max(20px, calc((100vw - 1100px) / 2 + 32px))`, zIndex: 110,
           width: 44, height: 44, borderRadius: 9999,
           background: T.bgCard,
           border: `1px solid ${T.border}`,
@@ -4267,6 +4265,7 @@ export default function VocabApp() {
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.text }}>
       <style>{`
+        html, body { margin: 0; padding: 0; background: ${T.bg}; }
         * { -webkit-font-smoothing: antialiased; box-sizing: border-box; }
         ::placeholder { color: ${T.textPlaceholder}; }
         textarea::placeholder { color: ${T.textPlaceholder}; }
