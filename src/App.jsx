@@ -3839,7 +3839,7 @@ export default function VocabApp() {
   const daysStudiedThisYear = Object.keys(practiceDays).filter((d) => d.startsWith(String(new Date().getFullYear())) && studiedOnDay(practiceDays[d])).length;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
-    { id: "words", label: t.words, badge: cards.length || null },
+    { id: "words", label: t.words, badge: cards.filter((c) => !c.suspended).length || null },
     { id: "heatmap", label: t.progress, badge: `${daysStudiedThisYear} ${settings.lang === "en" ? "days" : "dias"}` },
   ];
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
