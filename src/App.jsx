@@ -27,6 +27,10 @@ const FSRS_F = 19.0 / 81.0;
 const FSRS_C = -0.5;
 const DESIRED_RETENTION = 0.9;
 const MAX_INTERVAL = 36500;
+// Default Google Apps Script sync endpoint. Pre-filled so sync works out of the
+// box on every device. The Settings input can still override it — a non-empty
+// saved value always wins.
+const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby0Iw4rSGwPuqm7IXVF4WIwDw910hdMW2vP-jhXYeEtcSpSTaYJQC2DEk1OVcj7mGE/exec";
 // Grades: 1=Forgot, 2=Hard, 3=Good, 4=Easy
 const FSRS = {
   // Forgetting curve: R(t, S) = (1 + F * t/S)^C
@@ -1222,6 +1226,7 @@ const i18n = {
     headerPortuguese: "Português",
     headerDue: "Revisão",
     headerStage: "Estágio",
+    headerLastStudied: "Estudado",
     settingsTitle: "ajustes",
     dailyGoal: "Meta diária",
     dailyGoalDesc: "Quantas cartas você quer revisar por dia.",
@@ -1308,6 +1313,10 @@ const i18n = {
     sheetsLastSync: "Última sincronização",
     searchPlaceholder: "buscar palavras ou frases...",
     groupByStage: "agrupar",
+    sortBy: "ordenar",
+    sortAdded: "Adicionado",
+    sortAsc: "Crescente",
+    sortDesc: "Decrescente",
   },
   en: {
     practice: "practice",
@@ -1397,6 +1406,7 @@ const i18n = {
     headerPortuguese: "Portuguese",
     headerDue: "Due",
     headerStage: "Stage",
+    headerLastStudied: "Studied",
     settingsTitle: "settings",
     dailyGoal: "Daily goal",
     dailyGoalDesc: "How many cards you want to review per day.",
@@ -1483,6 +1493,10 @@ const i18n = {
     sheetsLastSync: "Last synced",
     searchPlaceholder: "search words or phrases...",
     groupByStage: "group",
+    sortBy: "sort",
+    sortAdded: "Added",
+    sortAsc: "Ascending",
+    sortDesc: "Descending",
   },
 };
 let t = i18n["pt-BR"];
@@ -1750,7 +1764,7 @@ const phraseToHtml = (phrase, spans, escapeFn) => {
   return html;
 };
 // ─── Phrase Display ───
-function PhraseDisplay({ phrase, spans, keywordStart, keywordEnd, size = "normal", mobile = false }) {
+function PhraseDisplay({ phrase, spans, keywordStart, keywordEnd, size = "normal", mobile = false, fontSize }) {
   if (!phrase) return null;
   // Resolve spans: new prop wins, otherwise fall back to legacy single-span props.
   let effective = Array.isArray(spans) ? spans : null;
@@ -1759,7 +1773,7 @@ function PhraseDisplay({ phrase, spans, keywordStart, keywordEnd, size = "normal
     effective = [[keywordStart, keywordEnd]];
   }
   const isHero = size === "hero";
-  const fs = isHero ? (mobile ? 32 : 56) : size === "large" ? 20 : size === "practice" ? 24 : 14;
+  const fs = fontSize != null ? fontSize : (isHero ? (mobile ? 32 : 56) : size === "large" ? 20 : size === "practice" ? 24 : 14);
   const textColor = isHero || size === "practice" ? T.text : T.textSecondary;
   const fontFamily = isHero ? font.serif : font.body;
   const fontWeight = isHero ? 600 : 400;
@@ -1832,26 +1846,44 @@ function UnsuspendIcon({ size = 18, color = T.textTertiary }) {
 }
 // Phase-of-moon icon: visual indicator for the FSRS rating scale.
 // fill 0 → empty circle, 0.5 → half-filled, 1 → fully filled.
-function MoonShapeIcon({ fill = 0, size = 18, color = T.text }) {
+let moonIdCounter = 0;
+function MoonShapeIcon({ fill = 0, size = 18, color = T.text, pie = false }) {
+  const r = size / 2;
+  const cr = r - 0.75; // circle radius leaving room for the 1.5px stroke
+  const cid = useMemo(() => `moon${moonIdCounter++}`, []);
+  // Pie mode: filled wedge of `fill` fraction with the cut-out slice centered on the right.
+  const piePath = (() => {
+    if (!pie || fill <= 0 || fill >= 1) return null;
+    const cut = (1 - fill) * 360;
+    const a0 = cut / 2, a1 = 360 - cut / 2;
+    const xy = (deg) => {
+      const rad = (deg * Math.PI) / 180;
+      return `${(r + cr * Math.cos(rad)).toFixed(2)} ${(r + cr * Math.sin(rad)).toFixed(2)}`;
+    };
+    const largeArc = (a1 - a0) > 180 ? 1 : 0;
+    return `M ${r} ${r} L ${xy(a0)} A ${cr} ${cr} 0 ${largeArc} 1 ${xy(a1)} Z`;
+  })();
   return (
-    <div
-      style={{
-        width: size, height: size, borderRadius: "50%",
-        border: `1.5px solid ${color}`, overflow: "hidden",
-        position: "relative", boxSizing: "border-box",
-        flexShrink: 0, display: "inline-block",
-      }}
+    <svg
+      width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden
+      style={{ flexShrink: 0, display: "inline-block", verticalAlign: "middle" }}
     >
+      <circle cx={r} cy={r} r={cr} fill="none" stroke={color} strokeWidth="1.5" />
       {fill > 0 && (
-        <div
-          style={{
-            position: "absolute", left: 0, top: 0,
-            width: `${fill * 100}%`, height: "100%",
-            background: color,
-          }}
-        />
+        pie ? (
+          fill >= 1
+            ? <circle cx={r} cy={r} r={cr} fill={color} />
+            : <path d={piePath} fill={color} />
+        ) : (
+          <>
+            <defs>
+              <clipPath id={cid}><circle cx={r} cy={r} r={cr} /></clipPath>
+            </defs>
+            <rect x="0" y="0" width={size * fill} height={size} fill={color} clipPath={`url(#${cid})`} />
+          </>
+        )
       )}
-    </div>
+    </svg>
   );
 }
 function SkipForwardIcon({ size = 18, color = T.text }) {
@@ -2095,7 +2127,7 @@ const DrawingCanvas = memo(forwardRef(function DrawingCanvas({ height = 200, onD
   );
 }));
 // ─── Practice Card ───
-function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode: answerModeProp = "type", setAnswerMode }) {
+function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, studyDirection, answerMode: answerModeProp = "type", setAnswerMode, activeSession, liveElapsed, onStartTimer, onStopTimer }) {
   const mobile = useIsMobile();
   // Drawing/"escrever" mode is desktop-only; mobile is always type mode.
   const answerMode = mobile ? "type" : answerModeProp;
@@ -2177,9 +2209,64 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
     { q: 0, label: t.skip, icon: <SkipForwardIcon size={20} color={T.text} />, days: null },
     { q: 1, label: t.forgot, icon: <XMarkIcon size={20} color={T.text} />, days: intervals[0] },
     { q: 2, label: t.partiallyRecalled, icon: <MoonShapeIcon fill={0.5} size={18} color={T.text} />, days: intervals[1] },
-    { q: 3, label: t.recalledWithEffort, icon: <MoonShapeIcon fill={0.78} size={18} color={T.text} />, days: intervals[2] },
+    { q: 3, label: t.recalledWithEffort, icon: <MoonShapeIcon fill={0.75} pie size={18} color={T.text} />, days: intervals[2] },
     { q: 4, label: t.easilyRecalled, icon: <MoonShapeIcon fill={1} size={18} color={T.text} />, days: intervals[3] },
   ];
+  const renderQualityBtn = (btn) => (
+    <button
+      key={btn.q}
+      onClick={() => handleReview(btn.q)}
+      style={{
+        padding: mobile ? "14px 8px" : "20px 12px",
+        background: T.bgCard,
+        border: `1px solid ${T.border}`,
+        borderRadius: 14,
+        cursor: "pointer",
+        transition: "all 0.15s",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+        minHeight: mobile ? 92 : 108,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; }}
+    >
+      <div style={{ height: 22, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
+        {btn.icon}
+      </div>
+      <span style={{
+        fontFamily: font.body, fontSize: mobile ? 13 : 14, fontWeight: 500,
+        color: T.text, lineHeight: 1.2, textAlign: "center",
+      }}>
+        {btn.label}
+      </span>
+      {btn.days != null && (
+        <span style={{
+          fontFamily: font.mono, fontSize: 10, color: T.textTertiary,
+          lineHeight: 1.2, textAlign: "center",
+          letterSpacing: 0.3, fontVariantNumeric: "tabular-nums",
+        }}>
+          {formatFutureDate(btn.days)}
+        </span>
+      )}
+    </button>
+  );
+  const renderSkipBtn = () => (
+    <button
+      onClick={() => handleReview(0)}
+      style={{
+        marginTop: mobile ? 8 : 12, width: "100%", padding: mobile ? "12px" : "13px",
+        background: "transparent", border: `1px solid ${T.border}`,
+        borderRadius: 14, cursor: "pointer", transition: "all 0.15s",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = "transparent"; }}
+    >
+      <SkipForwardIcon size={16} color={T.textSecondary} />
+      <span style={{ fontFamily: font.body, fontSize: 13, fontWeight: 500, color: T.textSecondary }}>
+        {t.skip}
+      </span>
+    </button>
+  );
   // Which side of the card shows Portuguese (the side that gets the audio button)
   const showingPortuguese = flipped ? studyDirection === "en-pt" : studyDirection === "pt-en";
   const heroText = (() => {
@@ -2239,6 +2326,40 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
   };
   const onCircleEnter = (e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; };
   const onCircleLeave = (e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; };
+  // Listen-to-pronunciation as a circle icon button (speaker / stop while playing).
+  const speakBtn = (
+    <button
+      onClick={() => handleSpeak(card.phrase || card.word)}
+      aria-label={isSpeaking ? t.stopPronunciation : t.listenPronunciation}
+      title={isSpeaking ? t.stopPronunciation : t.listenPronunciation}
+      style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}
+    >
+      {isSpeaking ? <StopIcon size={13} color={T.textSecondary} /> : <SpeakerIcon size={16} color={T.textSecondary} />}
+    </button>
+  );
+  // Study timer: circle (play) when idle, blue pill with elapsed time when running.
+  const timerBtn = (
+    <button
+      onClick={activeSession ? onStopTimer : onStartTimer}
+      aria-label={activeSession ? t.stopTimer : t.startTimer}
+      title={activeSession ? t.stopTimer : t.startTimer}
+      style={activeSession
+        ? { display: "inline-flex", alignItems: "center", gap: 7, height: 36, padding: "0 14px", borderRadius: 9999, background: T.bgCard, border: `1px solid ${T.border}`, cursor: "pointer", transition: "all 0.15s", fontFamily: font.mono, fontSize: 12, color: T.keyword, fontVariantNumeric: "tabular-nums", letterSpacing: 0.3, flexShrink: 0 }
+        : circleIconStyle}
+      onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}
+    >
+      {activeSession ? (
+        <>
+          <StopIcon size={11} color={T.keyword} />
+          <span>{formatDuration(liveElapsed)}</span>
+        </>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill={T.textSecondary} stroke="none" aria-hidden>
+          <polygon points="7,5 19,12 7,19" />
+        </svg>
+      )}
+    </button>
+  );
   return (
     <div style={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(-16px)" : "translateY(0)", transition: "all 0.28s ease" }}>
       {editing ? (
@@ -2300,9 +2421,9 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
           </div>
         </div>
       ) : (
-        <div style={{ maxWidth: 1100, margin: "0 auto", width: "100%", padding: mobile ? "64px 0 0" : "96px 0 0" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", width: "100%", padding: mobile ? "24px 0 0" : "96px 0 0" }}>
           {/* Language label */}
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ textAlign: "center", marginBottom: mobile ? 12 : 24 }}>
             <span style={{
               fontFamily: font.body, fontSize: mobile ? 10 : 11, color: T.textTertiary,
               textTransform: "uppercase", letterSpacing: 3.5, fontWeight: 500,
@@ -2331,7 +2452,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
           {/* Action button row */}
           <div style={{
             display: "flex", justifyContent: "center", alignItems: "center", gap: 8,
-            marginTop: 64, marginBottom: 28,
+            marginTop: mobile ? 20 : 64, marginBottom: mobile ? 16 : 28,
             minHeight: 36, flexWrap: "wrap", padding: "0 16px",
           }}>
             {!hasRevealed ? (
@@ -2360,22 +2481,10 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                     {opt.label.toLowerCase()}
                   </button>
                 ))}
-                {studyDirection === "pt-en" && (
-                  <button
-                    onClick={() => handleSpeak(card.phrase || card.word)}
-                    style={{ ...pillStyle(isSpeaking), color: T.textSecondary, minWidth: mobile ? 158 : 184 }}
-                  >
-                    <span style={{ width: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                      {isSpeaking
-                        ? <StopIcon size={12} color={T.textSecondary} />
-                        : <span style={{ fontSize: 14, lineHeight: 1 }}>♪</span>}
-                    </span>
-                    <span>{(isSpeaking ? t.stopPronunciation : t.listenPronunciation).toLowerCase()}</span>
-                  </button>
-                )}
-                {!mobile && (onSuspend || onUpdate) && (setAnswerMode || studyDirection === "pt-en") && (
+                {!mobile && setAnswerMode && (
                   <div aria-hidden style={{ width: 1, height: 20, background: T.border, margin: "0 6px" }} />
                 )}
+                {studyDirection === "pt-en" && speakBtn}
                 {onSuspend && (
                   <button onClick={() => onSuspend(card.id)} aria-label={t.suspend} title={t.suspend}
                     style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}>
@@ -2388,6 +2497,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                     <PencilIcon size={14} color={T.textSecondary} />
                   </button>
                 )}
+                {timerBtn}
               </>
             ) : (
               <>
@@ -2397,22 +2507,8 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                 >
                   <RefreshIcon size={14} color={T.textSecondary} />
                 </button>
-                {studyDirection === "en-pt" && (
-                  <button
-                    onClick={() => handleSpeak(card.phrase || card.word)}
-                    style={{ ...pillStyle(isSpeaking), color: T.textSecondary, minWidth: mobile ? 158 : 184 }}
-                  >
-                    <span style={{ width: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-                      {isSpeaking
-                        ? <StopIcon size={12} color={T.textSecondary} />
-                        : <span style={{ fontSize: 14, lineHeight: 1 }}>♪</span>}
-                    </span>
-                    <span>{(isSpeaking ? t.stopPronunciation : t.listenPronunciation).toLowerCase()}</span>
-                  </button>
-                )}
-                {!mobile && (onSuspend || onUpdate) && (
-                  <div aria-hidden style={{ width: 1, height: 20, background: T.border, margin: "0 6px" }} />
-                )}
+                <div aria-hidden style={{ width: 1, height: 20, background: T.border, margin: "0 6px" }} />
+                {studyDirection === "en-pt" && speakBtn}
                 {onSuspend && (
                   <button onClick={() => onSuspend(card.id)} aria-label={t.suspend} title={t.suspend}
                     style={circleIconStyle} onMouseEnter={onCircleEnter} onMouseLeave={onCircleLeave}>
@@ -2425,12 +2521,13 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                     <PencilIcon size={14} color={T.textSecondary} />
                   </button>
                 )}
+                {timerBtn}
               </>
             )}
           </div>
           {/* Mid slot: input (type/question) | drawing canvas (write) | answer comparison (type/answer) — same vertical position */}
           <div style={{
-            maxWidth: mobile ? "100%" : 700, margin: "0 auto",
+            maxWidth: mobile ? "100%" : 900, margin: "0 auto",
             padding: mobile ? "0 16px" : 0,
             minHeight: answerMode === "write" ? undefined : 64,
           }}>
@@ -2443,6 +2540,11 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && userAnswer.trim()) { e.preventDefault(); handleCheck(e); } }}
                 placeholder={studyDirection === "en-pt" ? t.typeAnswerPt : t.typeAnswerEn}
                 autoFocus
+                name="answer"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 style={{
                   width: "100%", minHeight: 64, padding: "20px 28px", boxSizing: "border-box",
                   background: T.bgInput,
@@ -2495,7 +2597,7 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
           </div>
           {/* Bottom slot: verify (question) OR rating buttons (answer) */}
           <div style={{
-            maxWidth: mobile ? "100%" : 1000, margin: "28px auto 0",
+            maxWidth: mobile ? "100%" : 900, margin: mobile ? "12px auto 0" : (hasRevealed ? "12px auto 0" : "28px auto 0"),
             padding: mobile ? "0 16px" : 0,
           }}>
             {!hasRevealed && (() => {
@@ -2534,49 +2636,14 @@ function PracticeCard({ card, onReview, onSkip, onUpdate, onSuspend, totalDue, s
               );
             })()}
             {hasRevealed && (
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(5, 1fr)",
-                gap: mobile ? 8 : 12,
-              }}>
-                {qualityButtons.map((btn) => (
-                  <button
-                    key={btn.q}
-                    onClick={() => handleReview(btn.q)}
-                    style={{
-                      padding: mobile ? "14px 8px" : "20px 12px",
-                      background: T.bgCard,
-                      border: `1px solid ${T.border}`,
-                      borderRadius: 14,
-                      cursor: "pointer",
-                      transition: "all 0.15s",
-                      display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
-                      minHeight: mobile ? 92 : 108,
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; }}
-                  >
-                    <div style={{ height: 22, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
-                      {btn.icon}
-                    </div>
-                    <span style={{
-                      fontFamily: font.body, fontSize: mobile ? 13 : 14, fontWeight: 500,
-                      color: T.text, lineHeight: 1.2, textAlign: "center",
-                    }}>
-                      {btn.label}
-                    </span>
-                    {btn.days != null && (
-                      <span style={{
-                        fontFamily: font.mono, fontSize: 10, color: T.textTertiary,
-                        lineHeight: 1.2, textAlign: "center",
-                        letterSpacing: 0.3, fontVariantNumeric: "tabular-nums",
-                      }}>
-                        {formatFutureDate(btn.days)}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
+              <>
+                {/* Grades: 2×2 on mobile, one row of four on desktop */}
+                <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: mobile ? 8 : 12 }}>
+                  {qualityButtons.filter((b) => b.q !== 0).map(renderQualityBtn)}
+                </div>
+                {/* Skip as a slim secondary action below */}
+                {renderSkipBtn()}
+              </>
             )}
           </div>
         </div>
@@ -2599,6 +2666,12 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
     const yyyy = d.getFullYear();
     return `${mm}/${dd}/${yyyy}`;
   })();
+  const lastStudiedLabel = card.lastReview
+    ? (() => {
+        const d = new Date(card.lastReview + "T12:00:00");
+        return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+      })()
+    : "—";
   const isNew = card.reps === 0;
   const escHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const toEnHtml = () => escHtml(card.translation || "");
@@ -2655,48 +2728,46 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
     whiteSpace: "pre-wrap",
   };
   if (mobile) {
+    const stage = card.suspended ? "suspended" : getStage(card);
+    const sc = stageColors[stage];
+    const isDark = T.bg === "#0E0E0E";
     return (
       <div
         style={{
-          padding: "12px 16px",
+          padding: "22px 20px",
           borderBottom: `1px solid ${T.border}`,
           position: "relative",
           contentVisibility: menuOpen ? "visible" : "auto",
-          containIntrinsicSize: "auto 80px",
+          containIntrinsicSize: "auto 124px",
           zIndex: menuOpen ? 20 : "auto",
+          display: "flex", flexDirection: "column", gap: 12,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 6 }}>
-          <span style={{ fontFamily: font.body, fontSize: 15, fontWeight: 500, color: T.text, wordBreak: "break-word" }}>
-            {card.translation}
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            {(() => {
-              const stage = card.suspended ? "suspended" : getStage(card);
-              const sc = stageColors[stage];
-              const isDark = T.bg === "#0E0E0E";
-              return (
-                <span style={{
-                  fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
-                  background: sc.bg, color: isDark ? sc.darkText : sc.text,
-                }}>
-                  {stageLabel(stage)}
-                </span>
-              );
-            })()}
-            <div style={{ position: "relative" }}>
-              <button
-                onClick={() => setMenuOpen(!menuOpen)}
-                style={{
-                  background: "none", border: "none", cursor: "pointer", padding: "4px 6px",
-                  borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill={T.textSecondary}>
-                  <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
-                </svg>
-              </button>
-              {menuOpen && (
+        {/* Top row: status badge + dates (left) · more menu (right) */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
+            <span style={{
+              fontFamily: font.mono, fontSize: 9, padding: "3px 9px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
+              background: sc.bg, color: isDark ? sc.darkText : sc.text,
+            }}>
+              {stageLabel(stage)}
+            </span>
+          </div>
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: "4px 6px",
+                borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={T.textSecondary}>
+                <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+              </svg>
+            </button>
+            {menuOpen && (
+              <>
+                <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
                 <div style={{
                   position: "absolute", right: 0, top: "100%", marginTop: 4, zIndex: 10,
                   background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
@@ -2771,31 +2842,19 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
                     {t.deleteWord}
                   </button>
                 </div>
+              </>
               )}
             </div>
           </div>
-        </div>
-        {card.phrase && (
-          <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, wordBreak: "break-word" }}>
-            <PhraseDisplay phrase={card.phrase} spans={card.keywordSpans} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="small" />
-          </div>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-          {(() => {
-            const isDark = T.bg === "#0E0E0E";
-            const newSc = stageColors.new;
-            const showPriority = isNew && card.priority;
-            return (
-              <span style={{
-                fontFamily: font.mono, fontSize: 9, padding: "3px 8px", borderRadius: 20, letterSpacing: 0.5, whiteSpace: "nowrap",
-                background: showPriority ? T.borderStrong : (isNew ? newSc.bg : (isOverdue ? T.dangerBg : T.accentSoft)),
-                color: showPriority ? T.text : (isNew ? (isDark ? newSc.darkText : newSc.text) : (isOverdue ? T.danger : T.textTertiary)),
-                fontWeight: 400,
-              }}>
-                {showPriority ? t.upNext : (isNew ? t.notAvailable : dueLabel)}
-              </span>
-            );
-          })()}
+        {/* English on its own row */}
+        <span style={{ fontFamily: font.body, fontSize: 16, fontWeight: 500, color: T.text, wordBreak: "break-word", lineHeight: 1.45 }}>
+          {card.translation}
+        </span>
+        {/* Portuguese on its own row */}
+        <div style={{ fontFamily: font.body, fontSize: 16, color: T.textSecondary, wordBreak: "break-word", lineHeight: 1.45 }}>
+          {card.phrase
+            ? <PhraseDisplay phrase={card.phrase} spans={card.keywordSpans} keywordStart={card.keywordStart} keywordEnd={card.keywordEnd} size="small" fontSize={16} />
+            : card.word}
         </div>
       </div>
     );
@@ -2804,7 +2863,7 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 1fr 90px 90px 32px",
+        gridTemplateColumns: "1fr 1fr 90px 90px 90px 32px",
         gap: 12,
         alignItems: "start",
         padding: "10px 20px",
@@ -2851,6 +2910,14 @@ const WordRow = memo(function WordRow({ card, onDelete, onSpeak, onUpdate, onTog
             </span>
           );
         })()}
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "center", paddingTop: 4 }}>
+        <span style={{
+          fontFamily: font.mono, fontSize: 11, color: T.textTertiary,
+          whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
+        }}>
+          {lastStudiedLabel}
+        </span>
       </div>
       <div style={{ position: "relative", paddingTop: 4 }}>
         <button
@@ -3601,6 +3668,7 @@ export default function VocabApp() {
   const [deletedCards, setDeletedCards] = useState({});
   const [sortKey, setSortKey] = useState("added");
   const [sortDir, setSortDir] = useState("desc");
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [groupByStage, setGroupByStage] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
@@ -3619,11 +3687,11 @@ export default function VocabApp() {
     cardOrder: "due",
     lang: "pt-BR",
     apiKey: "",
-    scriptUrl: "",
+    scriptUrl: DEFAULT_SCRIPT_URL,
   });
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [keySaved, setKeySaved] = useState(false);
-  const [scriptUrlInput, setScriptUrlInput] = useState("");
+  const [scriptUrlInput, setScriptUrlInput] = useState(DEFAULT_SCRIPT_URL);
   const [syncStatus, setSyncStatus] = useState("idle");
   const [syncError, setSyncError] = useState("");
   const [lastSynced, setLastSynced] = useState(null);
@@ -3636,6 +3704,23 @@ export default function VocabApp() {
   useEffect(() => { cardsRef.current = cards; }, [cards]);
   useEffect(() => { practiceDaysRef.current = practiceDays; }, [practiceDays]);
   useEffect(() => { deletedCardsRef.current = deletedCards; }, [deletedCards]);
+  // Lock the practice screen in place on mobile so the keyboard can't shove the
+  // header/content around — everything stays put, no scrolling. The words and
+  // progress views still scroll normally.
+  useEffect(() => {
+    if (!mobile || view !== "practice") return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = { html: html.style.overflow, body: body.style.overflow, overscroll: body.style.overscrollBehavior };
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
+    return () => {
+      html.style.overflow = prev.html;
+      body.style.overflow = prev.body;
+      body.style.overscrollBehavior = prev.overscroll;
+    };
+  }, [mobile, view]);
   T = themes[settings.theme] || themes.light;
   t = i18n[settings.lang] || i18n["pt-BR"];
   const doSync = useCallback(async (localCards, localDays, scriptUrl) => {
@@ -3685,9 +3770,9 @@ export default function VocabApp() {
         const r = await window.storage.get("vocab-settings");
         if (r) {
           savedSettings = JSON.parse(r.value);
-          setSettings((prev) => ({ ...prev, ...savedSettings }));
+          setSettings((prev) => ({ ...prev, ...savedSettings, scriptUrl: savedSettings.scriptUrl || DEFAULT_SCRIPT_URL }));
           if (savedSettings.apiKey) setApiKeyInput(savedSettings.apiKey);
-          if (savedSettings.scriptUrl) setScriptUrlInput(savedSettings.scriptUrl);
+          setScriptUrlInput(savedSettings.scriptUrl || DEFAULT_SCRIPT_URL);
         }
       } catch {}
       // Load local data
@@ -3756,7 +3841,7 @@ export default function VocabApp() {
       setLoaded(true);
 
       // Background sync with Google Sheets
-      const sUrl = savedSettings?.scriptUrl || "";
+      const sUrl = savedSettings?.scriptUrl || DEFAULT_SCRIPT_URL;
       if (sUrl) {
         setSyncStatus("syncing");
         try {
@@ -4203,6 +4288,7 @@ export default function VocabApp() {
       else if (sortKey === "phrase") { va = (a.phrase || "").toLowerCase(); vb = (b.phrase || "").toLowerCase(); }
       else if (sortKey === "stage") { va = so[getStage(a)]; vb = so[getStage(b)]; }
       else if (sortKey === "dueDate") { va = a.dueDate || ""; vb = b.dueDate || ""; }
+      else if (sortKey === "lastReview") { va = a.lastReview || ""; vb = b.lastReview || ""; }
       else if (sortKey === "added") { va = a.id || ""; vb = b.id || ""; }
       else { va = ""; vb = ""; }
       if (va < vb) return sortDir === "asc" ? -1 : 1;
@@ -4242,10 +4328,11 @@ export default function VocabApp() {
     );
   }
   const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
+  const daysStudiedThisYear = Object.keys(practiceDays).filter((d) => d.startsWith(String(new Date().getFullYear())) && totalForDay(practiceDays[d]) > 0).length;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
     { id: "words", label: t.words, badge: cards.length || null },
-    { id: "heatmap", label: t.progress },
+    { id: "heatmap", label: t.progress, badge: `${daysStudiedThisYear} ${settings.lang === "en" ? "days" : "dias"}` },
   ];
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
   // Action buttons (timer, sync, settings) — same JSX rendered in two places:
@@ -4275,26 +4362,6 @@ export default function VocabApp() {
   const headerOnLeave = (e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; };
   const headerActions = (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <button
-        onClick={activeSession ? stopTimer : startTimer}
-        title={activeSession ? t.stopTimer : t.startTimer}
-        style={activeSession ? headerPillStyle(T.success) : headerCircleStyle}
-        onMouseEnter={headerOnEnter}
-        onMouseLeave={headerOnLeave}
-      >
-        {activeSession ? (
-          <>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.success} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-            <span>{formatDuration(liveElapsed)}</span>
-          </>
-        ) : (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill={T.textSecondary} stroke="none" aria-hidden>
-            <polygon points="7,5 19,12 7,19" />
-          </svg>
-        )}
-      </button>
       <button
         onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
         disabled={syncStatus === "syncing"}
@@ -4343,7 +4410,7 @@ export default function VocabApp() {
     <div style={{ minHeight: "100vh", background: T.bg, color: T.text }}>
       <style>{`
         html, body { margin: 0; padding: 0; background: ${T.bg}; }
-        * { -webkit-font-smoothing: antialiased; box-sizing: border-box; }
+        * { -webkit-font-smoothing: antialiased; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         ::placeholder { color: ${T.textPlaceholder}; }
         textarea::placeholder { color: ${T.textPlaceholder}; }
         button:active { transform: scale(0.98); }
@@ -4355,24 +4422,24 @@ export default function VocabApp() {
         .nav-scroll::-webkit-scrollbar { display: none; }
         .nav-scroll { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
-      <div style={{ padding: mobile ? "16px 16px 0" : "28px 36px 0", maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ padding: mobile ? "16px 16px 0" : "18px 36px 0", maxWidth: 1200, margin: "0 auto" }}>
         {mobile && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
             {headerActions}
           </div>
         )}
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, borderBottom: `1px solid ${T.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, paddingBottom: mobile ? 0 : 14, borderBottom: `1px solid ${T.border}` }}>
         <div className="nav-scroll" style={{ display: mobile ? "none" : "flex", gap: 28, overflowX: "auto", WebkitOverflowScrolling: "touch", flex: 1, minWidth: 0 }}>
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setView(item.id)}
               style={{
-                padding: mobile ? "10px 14px" : "10px 0 12px 0",
+                padding: mobile ? "10px 14px" : "8px 0",
                 background: "none",
                 border: "none",
                 borderBottom: view === item.id ? `4px solid ${T.text}` : "4px solid transparent",
-                marginBottom: -1,
+                marginBottom: 0,
                 color: view === item.id ? T.text : T.textTertiary,
                 fontFamily: font.body,
                 fontSize: mobile ? 11 : 12,
@@ -4407,7 +4474,7 @@ export default function VocabApp() {
           ))}
         </div>
         {!mobile && (
-          <div style={{ paddingBottom: 6 }}>
+          <div>
             {headerActions}
           </div>
         )}
@@ -4446,7 +4513,7 @@ export default function VocabApp() {
                 )}
               </div>
             ) : (
-              <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} setAnswerMode={setAnswerMode} />
+              <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} setAnswerMode={setAnswerMode} activeSession={activeSession} liveElapsed={liveElapsed} onStartTimer={startTimer} onStopTimer={stopTimer} />
             )}
           </>
         )}
@@ -4474,6 +4541,78 @@ export default function VocabApp() {
                   onBlur={(e) => { e.target.style.borderColor = T.border; }}
                 />
               </div>
+              <div style={{ position: "relative", marginLeft: mobile ? 0 : "auto" }}>
+                <button
+                  onClick={() => setSortMenuOpen((o) => !o)}
+                  style={{
+                    padding: mobile ? "0 16px" : "0 18px",
+                    height: 40,
+                    background: T.bgCard,
+                    border: `1px solid ${sortMenuOpen ? T.text : T.border}`,
+                    borderRadius: 9999,
+                    color: sortMenuOpen ? T.text : T.textSecondary,
+                    fontFamily: font.body, fontSize: 13, fontWeight: 500, cursor: "pointer", letterSpacing: 0.2,
+                    display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={(e) => { if (!sortMenuOpen) { e.currentTarget.style.borderColor = T.borderStrong; e.currentTarget.style.background = T.bgCardHover; } }}
+                  onMouseLeave={(e) => { if (!sortMenuOpen) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; } }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="4" y1="6" x2="20" y2="6" /><line x1="6" y1="12" x2="18" y2="12" /><line x1="9" y1="18" x2="15" y2="18" />
+                  </svg>
+                  {!mobile && t.sortBy}
+                </button>
+                {sortMenuOpen && (
+                  <>
+                    <div onClick={() => setSortMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
+                    <div style={{
+                      position: "absolute", right: 0, top: "100%", marginTop: 6, zIndex: 31,
+                      background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                      boxShadow: T.shadowLg, overflow: "hidden", minWidth: 230, padding: 4,
+                    }}>
+                      {[
+                        { key: "added", label: t.sortAdded },
+                        { key: "dueDate", label: t.headerDue },
+                        { key: "lastReview", label: t.headerLastStudied },
+                        { key: "stage", label: t.headerStage },
+                      ].map((f) => {
+                        const isActive = sortKey === f.key;
+                        return (
+                          <div key={f.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "7px 8px 7px 12px", borderRadius: 8 }}>
+                            <span style={{ fontFamily: font.body, fontSize: 13, color: isActive ? T.text : T.textSecondary, fontWeight: isActive ? 600 : 400 }}>
+                              {f.label}
+                            </span>
+                            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                              {["asc", "desc"].map((dir) => {
+                                const on = isActive && sortDir === dir;
+                                return (
+                                  <button
+                                    key={dir}
+                                    onClick={() => { setSortKey(f.key); setSortDir(dir); setGroupByStage(false); setCollapsedGroups(new Set()); setSortMenuOpen(false); }}
+                                    title={dir === "asc" ? t.sortAsc : t.sortDesc}
+                                    aria-label={`${f.label} — ${dir === "asc" ? t.sortAsc : t.sortDesc}`}
+                                    style={{
+                                      width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center",
+                                      background: on ? T.text : "transparent",
+                                      border: `1px solid ${on ? T.text : T.border}`,
+                                      borderRadius: 6, cursor: "pointer", transition: "all 0.12s", padding: 0,
+                                    }}
+                                  >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={on ? T.bg : T.textSecondary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: dir === "desc" ? "rotate(180deg)" : "none" }}>
+                                      <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
+                                    </svg>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
               <button
                 onClick={() => {
                   const next = !groupByStage;
@@ -4484,7 +4623,6 @@ export default function VocabApp() {
                 style={{
                   padding: mobile ? "0 16px" : "0 18px",
                   height: 40,
-                  marginLeft: mobile ? 0 : "auto",
                   background: T.bgCard,
                   border: `1px solid ${groupByStage ? T.text : T.border}`,
                   borderRadius: 9999,
@@ -4530,12 +4668,13 @@ export default function VocabApp() {
               </div>
             ) : (
               <div style={{ borderRadius: T.radius, border: `1px solid ${T.border}`, background: T.bgCard }}>
-                <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
+                <div style={{ display: mobile ? "none" : "grid", gridTemplateColumns: "1fr 1fr 90px 90px 90px 32px", gap: 12, padding: "11px 20px", borderBottom: `1px solid ${T.border}` }}>
                   {[
                     { key: null, label: t.headerEnglish, indent: true },
                     { key: null, label: t.headerPortuguese, indent: true },
                     { key: "stage", label: t.headerStage },
                     { key: "dueDate", label: t.headerDue },
+                    { key: "lastReview", label: t.headerLastStudied },
                     { key: null, label: "" },
                   ].map((col, ci) => (
                     <span
@@ -5900,15 +6039,19 @@ export default function VocabApp() {
       </div>
       {mobile && (
         <div style={{
-          position: "fixed", bottom: 12, left: 12, right: 12,
+          position: "fixed",
+          bottom: "calc(env(safe-area-inset-bottom, 0px) + 14px)",
+          left: "50%", transform: "translateX(-50%)",
           background: settings.theme === "dark" ? "rgba(30,30,30,0.8)" : "rgba(255,255,255,0.82)",
-          borderRadius: 9999,
+          borderRadius: 22,
           border: `1px solid ${settings.theme === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.05)"}`,
           boxShadow: `0 8px 32px rgba(0,0,0,${settings.theme === "dark" ? "0.4" : "0.1"})`,
           backdropFilter: "blur(24px) saturate(1.8)",
           WebkitBackdropFilter: "blur(24px) saturate(1.8)",
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: 5, gap: 2,
+          // Narrow, centered floating bar (Stoic-style). Each tab stacks label over
+          // badge. Concentric corners: bar radius 22 − padding 6 = pill radius 16.
+          display: "flex", alignItems: "stretch", gap: 4,
+          padding: 6,
           zIndex: 1000,
         }}>
           {navItems.map((item) => {
@@ -5918,30 +6061,30 @@ export default function VocabApp() {
                 key={item.id}
                 onClick={() => setView(item.id)}
                 style={{
-                  flex: "0 1 auto", minWidth: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                  minWidth: 88,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
                   background: active ? T.text : "transparent",
                   border: "none",
                   borderRadius: 9999,
-                  padding: active ? "10px 16px" : "10px 10px",
+                  padding: "7px 12px",
                   cursor: "pointer",
-                  transition: "background 0.15s",
+                  WebkitUserSelect: "none", userSelect: "none",
                   whiteSpace: "nowrap",
                 }}
               >
                 <span style={{
-                  fontFamily: font.body, fontSize: 10.5, fontWeight: 600,
-                  color: active ? T.bg : T.textTertiary,
-                  textTransform: "uppercase", letterSpacing: 1,
+                  fontFamily: font.body, fontSize: 12.5, fontWeight: 600,
+                  color: active ? T.bg : T.textSecondary,
+                  textTransform: "capitalize", letterSpacing: 0.2, lineHeight: 1.1,
                 }}>
                   {item.label}
                 </span>
-                {item.badge && (
+                {item.badge != null && (
                   <span style={{
-                    fontFamily: font.mono, fontSize: 9, fontWeight: 500,
+                    fontFamily: font.mono, fontSize: 9.5, fontWeight: 500,
                     color: active ? T.bg : T.textPlaceholder,
-                    opacity: active ? 0.6 : 1,
-                    letterSpacing: 0.3, fontVariantNumeric: "tabular-nums",
+                    opacity: active ? 0.65 : 1,
+                    letterSpacing: 0.3, fontVariantNumeric: "tabular-nums", lineHeight: 1.1,
                   }}>
                     {item.badge}
                   </span>
