@@ -1099,19 +1099,6 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
       if (m !== lastMonth) { monthPositions.push({ month: m, weekIndex: wi }); lastMonth = m; }
     }
   });
-  const totalDays = Object.values(practiceDays).filter((v) => totalForDay(v) > 0).length;
-  const currentStreak = (() => {
-    let streak = 0;
-    let d = new Date();
-    if (totalForDay(practiceDays[localDateStr(d)]) === 0) {
-      d.setDate(d.getDate() - 1);
-    }
-    while (true) {
-      const ds = localDateStr(d);
-      if (totalForDay(practiceDays[ds]) > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
-    }
-    return streak;
-  })();
   const totalWeeks = weeks.length;
   const gap = 2;
   return (
@@ -3671,10 +3658,9 @@ export default function VocabApp() {
       let entry = prev[t];
       if (typeof entry === "number") entry = { __legacy__: entry };
       if (!entry || typeof entry !== "object") entry = {};
-      const nd = { ...prev, [t]: { ...entry, [dev]: (entry[dev] || 0) + 1 } };
-      setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
-      return nd;
+      return { ...prev, [t]: { ...entry, [dev]: (entry[dev] || 0) + 1 } };
     });
+    setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
   };
   const [skippedIds, setSkippedIds] = useState(new Set());
   const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };

@@ -134,6 +134,18 @@ describe("mergeCards", () => {
     const { cards } = mergeCards(local, [], { a: 200 }, {});
     expect(cards.find((c) => c.id === "a")).toBeDefined();
   });
+
+  it("preserves local firstReviewedAt when a newer remote dropped it", () => {
+    const local = [{ id: "a", modifiedAt: 100, firstReviewedAt: "2026-01-01" }];
+    const remote = [{ id: "a", modifiedAt: 200 }];
+    const { cards } = mergeCards(local, remote, {}, {});
+    expect(cards.find((c) => c.id === "a").firstReviewedAt).toBe("2026-01-01");
+  });
+
+  it("adds a remote-only card not present locally", () => {
+    const { cards } = mergeCards([{ id: "a", modifiedAt: 100 }], [{ id: "b", modifiedAt: 50 }], {}, {});
+    expect(cards.map((c) => c.id).sort()).toEqual(["a", "b"]);
+  });
 });
 
 describe("mergePracticeDays", () => {
