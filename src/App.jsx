@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
+import { localDateStr, today, totalForDay, studiedOnDay, FSRS, mergeCards, mergePracticeDays } from "./srs.js";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -18,163 +19,10 @@ const useIsMobile = (breakpoint = 600) => {
 // Based on the open-spaced-repetition project
 // DSR model: Difficulty, Stability, Retrievability
 // 19 default parameters optimized on millions of reviews
-const FSRS_W = [
-  0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046,
-  1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315,
-  2.9898, 0.51655, 0.6621,
-];
-const FSRS_F = 19.0 / 81.0;
-const FSRS_C = -0.5;
-const DESIRED_RETENTION = 0.9;
-const MAX_INTERVAL = 36500;
 // Default Google Apps Script sync endpoint. Pre-filled so sync works out of the
 // box on every device. The Settings input can still override it — a non-empty
 // saved value always wins.
 const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby0Iw4rSGwPuqm7IXVF4WIwDw910hdMW2vP-jhXYeEtcSpSTaYJQC2DEk1OVcj7mGE/exec";
-// Grades: 1=Forgot, 2=Hard, 3=Good, 4=Easy
-const FSRS = {
-  // Forgetting curve: R(t, S) = (1 + F * t/S)^C
-  retrievability: (t, s) => {
-    if (s <= 0) return 0;
-    return Math.pow(1.0 + FSRS_F * (t / s), FSRS_C);
-  },
-  // Interval from desired retention and stability
-  interval: (s) => {
-    return Math.max(
-      1,
-      Math.min(
-        MAX_INTERVAL,
-        Math.round((s / FSRS_F) * (Math.pow(DESIRED_RETENTION, 1.0 / FSRS_C) - 1.0))
-      )
-    );
-  },
-  // Initial stability based on first grade
-  s0: (grade) => FSRS_W[grade - 1],
-  // Initial difficulty based on first grade
-  d0: (grade) => {
-    return Math.min(10, Math.max(1, FSRS_W[4] - Math.exp(FSRS_W[5] * (grade - 1)) + 1));
-  },
-  // Update stability on successful recall (grade 2, 3, or 4)
-  sSuccess: (d, s, r, grade) => {
-    const td = 11.0 - d;
-    const ts = Math.pow(s, -FSRS_W[9]);
-    const tr = Math.exp(FSRS_W[10] * (1.0 - r)) - 1.0;
-    const h = grade === 2 ? FSRS_W[15] : 1.0;
-    const b = grade === 4 ? FSRS_W[16] : 1.0;
-    const c = Math.exp(FSRS_W[8]);
-    const alpha = 1.0 + td * ts * tr * h * b * c;
-    return s * alpha;
-  },
-  // Update stability on failure (grade 1)
-  sFail: (d, s, r) => {
-    const df = Math.pow(d, -FSRS_W[12]);
-    const sf = Math.pow(s + 1, FSRS_W[13]) - 1.0;
-    const rf = Math.exp(FSRS_W[14] * (1.0 - r));
-    const cf = FSRS_W[11];
-    return Math.min(df * sf * rf * cf, s);
-  },
-  // Update stability
-  stability: (d, s, r, grade) => {
-    if (grade === 1) return FSRS.sFail(d, s, r);
-    return FSRS.sSuccess(d, s, r, grade);
-  },
-  // Update difficulty
-  difficulty: (d, grade) => {
-    const deltaD = -FSRS_W[6] * (grade - 3);
-    const dp = d + deltaD * ((10.0 - d) / 9.0);
-    const newD = FSRS_W[7] * FSRS.d0(4) + (1.0 - FSRS_W[7]) * dp;
-    return Math.min(10, Math.max(1, newD));
-  },
-  // Create a new card
-  defaultCard: (word, translation, phrase, keywordStart, keywordEnd) => ({
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    word,
-    translation,
-    phrase,
-    keywordStart,
-    keywordEnd,
-    // FSRS state
-    stability: 0,
-    difficulty: 0,
-    reps: 0,
-    dueDate: localDateStr(),
-    lastReview: null,
-    firstReviewedAt: null,
-    learningStep: 0,
-    priority: false,
-    suspended: false,
-    created: localDateStr(),
-    modifiedAt: Date.now(),
-  }),
-  // Review a card with a grade (1=Forgot, 2=Hard, 3=Good, 4=Easy)
-  review: (card, grade) => {
-    const reps = card.reps || 0;
-    const inLearning = reps === 0;
-    // Learning step: brand-new cards (or cards being relearned at reps=0) get one
-    // re-exposure in the same session before they graduate to FSRS scheduling.
-    // First click "Good/Easy/Hard" → 10min step. "Forgot" → restart the step.
-    // Second click (any non-Forgot) → graduate via the FSRS path below.
-    if (inLearning && (grade === 1 || (card.learningStep || 0) === 0)) {
-      return {
-        ...card,
-        dueDate: localDateStr(),
-        dueAfter: Date.now() + 10 * 60 * 1000,
-        lastReview: localDateStr(),
-        firstReviewedAt: card.firstReviewedAt || localDateStr(),
-        learningStep: 1,
-        priority: false,
-        modifiedAt: Date.now(),
-      };
-    }
-    let { stability: s, difficulty: d } = card;
-    if (reps === 0) {
-      // First graduating review: initialize S and D from the grade
-      s = FSRS.s0(grade);
-      d = FSRS.d0(grade);
-    } else {
-      // Calculate elapsed days since last review
-      const lastReviewDate = card.lastReview
-        ? new Date(card.lastReview + "T12:00:00")
-        : new Date();
-      const now = new Date();
-      const elapsed = Math.max(0, (now - lastReviewDate) / 86400000);
-      // Calculate retrievability at time of review
-      const r = FSRS.retrievability(elapsed, s);
-      // Update stability and difficulty
-      s = FSRS.stability(d, s, r, grade);
-      d = FSRS.difficulty(d, grade);
-    }
-    // Calculate next interval from new stability, with ±5% fuzz for intervals ≥ 3 days
-    let interval = FSRS.interval(s);
-    if (interval >= 3) {
-      const fuzz = 1 + (Math.random() - 0.5) * 0.1;
-      interval = Math.max(1, Math.min(MAX_INTERVAL, Math.round(interval * fuzz)));
-    }
-    const due = new Date();
-    due.setDate(due.getDate() + interval);
-    // Forgot cards reappear after 10 minutes instead of tomorrow
-    const dueAfter = grade === 1 ? Date.now() + 10 * 60 * 1000 : null;
-    return {
-      ...card,
-      stability: s,
-      difficulty: d,
-      reps: reps + 1,
-      dueDate: grade === 1 ? localDateStr() : localDateStr(due),
-      dueAfter,
-      lastReview: localDateStr(),
-      // Only mark firstReviewedAt when this is genuinely the card's first review
-      // (reps was 0). For already-graduated cards (reps > 0), leave it alone — they
-      // were "introduced" long ago, not today, and counting them would shrink the
-      // daily new-card slot pool incorrectly.
-      firstReviewedAt: card.firstReviewedAt || (reps === 0 ? localDateStr() : null),
-      // Clear the "study next" priority flag once the card has been introduced
-      priority: false,
-      // Reset learning step now that we've graduated
-      learningStep: 0,
-      modifiedAt: Date.now(),
-    };
-  },
-};
 // ─── FSRS Preview Intervals ───
 const previewIntervals = (card) => {
   const grades = [1, 2, 3, 4];
@@ -382,229 +230,6 @@ const parseImportText = (text) => {
   }
   return { results, errors };
 };
-// ─── RemNote Due Date Migration Data ───
-const REMNOTE_DUE_DATES = [
-  {"text": "O atleta usou uma bandagem para proteger o ferimento no joelho", "dueDate": "2026-01-06", "reps": 3},
-  {"text": "They discovered a hidden passage behind the bookshelf", "dueDate": "2026-01-06", "reps": 2},
-  {"text": "The steep roads of Ouro Preto are a challenge for tourists", "dueDate": "2026-01-06", "reps": 4},
-  {"text": "The public program aims to teach literacy to adults who didn't have the opportunity to study (To teach literacy / To make literate)", "dueDate": "2026-01-06", "reps": 3},
-  {"text": "It's necessary that you (plural) finish this service soon.", "dueDate": "2026-01-06", "reps": 6},
-  {"text": "You are the woman that I've always dreamed of meeting", "dueDate": "2026-01-07", "reps": 3},
-  {"text": "She went to look for the information on the official site", "dueDate": "2026-01-07", "reps": 3},
-  {"text": "Stop being a pussy and just talk to her", "dueDate": "2026-01-07", "reps": 4},
-  {"text": "Since the first meeting, we've (casual) gotten along well and worked in sync.", "dueDate": "2026-01-07", "reps": 7},
-  {"text": "When she complains for no reason, it drives me crazy (gets on my nerves)", "dueDate": "2026-01-07", "reps": 4},
-  {"text": "Matar dois coelhos com uma cajadada só", "dueDate": "2026-01-08", "reps": 4},
-  {"text": "Vocês têm que pagar, quer queiram quer não, caso contrário, chamamos a polícia", "dueDate": "2026-01-08", "reps": 3},
-  {"text": "The temperature rise has caused the so-called extreme events, like severe storms.", "dueDate": "2026-01-08", "reps": 4},
-  {"text": "É de cair o queixo", "dueDate": "2026-01-08", "reps": 4},
-  {"text": "We didn't have a nail to hang the picture.", "dueDate": "2026-01-08", "reps": 10},
-  {"text": "O que quer que diga, já ninguém acredita nele", "dueDate": "2026-01-08", "reps": 3},
-  {"text": "It's useful that you review the material before the", "dueDate": "2026-01-08", "reps": 5},
-  {"text": "Quaisquer que sejam as dificuldades, temos que enfrentá-las", "dueDate": "2026-01-08", "reps": 5},
-  {"text": "E ela? A própria", "dueDate": "2026-01-08", "reps": 1},
-  {"text": "The software froze unexpectedly during the update (Block / Lock / Jam, depends on context)", "dueDate": "2026-01-09", "reps": 10},
-  {"text": "It is important to store the documents in a secure place", "dueDate": "2026-01-09", "reps": 10},
-  {"text": "It's easy for you (both) to understand the explanation with this example.", "dueDate": "2026-01-09", "reps": 7},
-  {"text": "It's clear that they need help with so much work.", "dueDate": "2026-01-09", "reps": 3},
-  {"text": "When buying a TV, check the screen size in inches, as that is how manufacturers list it", "dueDate": "2026-01-09", "reps": 4},
-  {"text": "O novo inquilino vai receber as chaves apenas no dia da vigência do contrato", "dueDate": "2026-01-09", "reps": 6},
-  {"text": "Ele perguntou a respeito de sua nova proposta.", "dueDate": "2026-01-09", "reps": 5},
-  {"text": "Quando ela reclama sem motivo, isso me tira do sério", "dueDate": "2026-01-09", "reps": 3},
-  {"text": "My grandmother learned to sew beautiful dresses by hand", "dueDate": "2026-01-10", "reps": 5},
-  {"text": "Agora que a empresa está bem das pernas, podemos expandir.", "dueDate": "2026-01-10", "reps": 5},
-  {"text": "Por onde quer que venha, vão pegar um trânsito daqueles", "dueDate": "2026-01-10", "reps": 4},
-  {"text": "Keeping in mind the time constraints, we need to adjust the schedule", "dueDate": "2026-01-10", "reps": 4},
-  {"text": "O software apresentou uma trava inesperada durante a atualização", "dueDate": "2026-01-11", "reps": 6},
-  {"text": "Ele faz o que quer que seja para subir na vida", "dueDate": "2026-01-11", "reps": 2},
-  {"text": "É preciso que vocês acabem logo esse serviço.", "dueDate": "2026-01-11", "reps": 4},
-  {"text": "she's been looking for a job for months (coloquial present perfect continuous)", "dueDate": "2026-01-11", "reps": 7},
-  {"text": "Não adianta chorar pelo leite derramado", "dueDate": "2026-01-11", "reps": 4},
-  {"text": "Essa cadeira está solta, precisa de um parafuso", "dueDate": "2026-01-11", "reps": 6},
-  {"text": "It's likely that he will be late.", "dueDate": "2026-01-12", "reps": 5},
-  {"text": "Wherever they go, they always have a blast", "dueDate": "2026-01-12", "reps": 6},
-  {"text": "Todo motorista deve verificar os seus pontos", "dueDate": "2026-01-12", "reps": 3},
-  {"text": "Regarding the budget, we need to cut expenses. (Very formal)", "dueDate": "2026-01-13", "reps": 15},
-  {"text": "Last time we visited, we barely saw any toucans in the reserve", "dueDate": "2026-01-13", "reps": 5},
-  {"text": "Use the squeegee to get the water off the floor", "dueDate": "2026-01-14", "reps": 7},
-  {"text": "A gente precisa procurar uma solução rápida", "dueDate": "2026-01-14", "reps": 3},
-  {"text": "A apneia do sono é hereditária em minha família", "dueDate": "2026-01-14", "reps": 2},
-  {"text": "Now, more than ever, we need to act responsibly", "dueDate": "2026-01-15", "reps": 7},
-  {"text": "your property may be rented with QuintoAndar or with an estate agent.", "dueDate": "2026-01-15", "reps": 9},
-  {"text": "Autism is considered a spectrum disorder", "dueDate": "2026-01-15", "reps": 7},
-  {"text": "Eu amo línguas; para mim, estou decodificando o mundo ao meu redor", "dueDate": "2026-01-15", "reps": 2},
-  {"text": "É importante armazenar os documentos em um local seguro", "dueDate": "2026-01-16", "reps": 4},
-  {"text": "É justo que ele receba o prêmio.", "dueDate": "2026-01-17", "reps": 3},
-  {"text": "Sleep apnea is hereditary in my family.", "dueDate": "2026-01-17", "reps": 8},
-  {"text": "Tendo em mente o prazo apertado, precisamos trabalhar rápido.", "dueDate": "2026-01-18", "reps": 2},
-  {"text": "(Refogar) Para a sopa, refogue cebola picada em manteiga antes de adicionar os legumes", "dueDate": "2026-01-21", "reps": 5},
-  {"text": "O lançamento do aplicativo caiu de maduro depois de tanto esforço da equipe.", "dueDate": "2026-01-21", "reps": 4},
-  {"text": "It's jaw-dropping", "dueDate": "2026-01-22", "reps": 11},
-  {"text": "In the research, we used card sorting to understand the users' mental models.", "dueDate": "2026-01-24", "reps": 9},
-  {"text": "É bom que vocês cheguem na hora certa.", "dueDate": "2026-01-25", "reps": 4},
-  {"text": "We slept in a bunk bed when we went camping", "dueDate": "2026-01-26", "reps": 7},
-  {"text": "O aumento de temperatura tem causado os chamados eventos extremos, como tempestades severas.", "dueDate": "2026-01-27", "reps": 4},
-  {"text": "Throughout the year, we will review the results quarterly.", "dueDate": "2026-02-03", "reps": 10},
-  {"text": "Eu tenho escalado de vez em quando há alguns anos.", "dueDate": "2026-02-07", "reps": 3},
-  {"text": "The app launch was bound to happen after so much effort from the team.", "dueDate": "2026-02-08", "reps": 11},
-  {"text": "If I'm not mistaken, the restaurant closes at ten (formal)", "dueDate": "2026-02-08", "reps": 7},
-  {"text": "They installed an access ramp for wheelchair users", "dueDate": "2026-02-10", "reps": 11},
-  {"text": "To draw a line on the ground with chalk", "dueDate": "2026-02-10", "reps": 4},
-  {"text": "I came out at 16", "dueDate": "2026-02-11", "reps": 9},
-  {"text": "That technology is light-years ahead of the competition.", "dueDate": "2026-02-12", "reps": 11},
-  {"text": "Everyone feels comfortable here. (two words, not \"tudo mundo\")", "dueDate": "2026-02-13", "reps": 4},
-  {"text": "do you know how to take care of plants?", "dueDate": "2026-02-14", "reps": 3},
-  {"text": "My neighborhood went through a process of gentrification in recent years", "dueDate": "2026-02-15", "reps": 5},
-  {"text": "As roupas novas tinham várias manchas de tinta após a reforma.", "dueDate": "2026-02-19", "reps": 5},
-  {"text": "Relax, I'm kidding, don't take it seriously!", "dueDate": "2026-02-19", "reps": 10},
-  {"text": "He is preparing for the university entrance exam and is attending an intensive preparatory course on weekends", "dueDate": "2026-02-20", "reps": 7},
-  {"text": "Is it her? In the flesh", "dueDate": "2026-02-20", "reps": 5},
-  {"text": "He asked about your new proposal.", "dueDate": "2026-02-21", "reps": 9},
-  {"text": "The new tenant will only receive the keys on the contract's effective date", "dueDate": "2026-02-23", "reps": 11},
-  {"text": "My nephew fell and now he is toothless.", "dueDate": "2026-02-24", "reps": 8},
-  {"text": "Até onde eu sei, ninguém foi informado sobre a mudança.", "dueDate": "2026-02-24", "reps": 5},
-  {"text": "To scratch the car's paint", "dueDate": "2026-02-26", "reps": 9},
-  {"text": "To scratch the surface of something", "dueDate": "2026-02-27", "reps": 6},
-  {"text": "He's still looking for work", "dueDate": "2026-02-27", "reps": 4},
-  {"text": "We like to bake sourdough bread at home using my dad's recipe from Malta", "dueDate": "2026-02-28", "reps": 3},
-  {"text": "To swipe", "dueDate": "2026-03-01", "reps": 4},
-  {"text": "Wherever they go, they're hailed", "dueDate": "2026-03-02", "reps": 11},
-  {"text": "Apagar", "dueDate": "2026-03-02", "reps": 5},
-  {"text": "Minha avó aprendeu a costurar belos vestidos à mão", "dueDate": "2026-03-03", "reps": 3},
-  {"text": "As far as I know, no one was informed about the", "dueDate": "2026-03-04", "reps": 7},
-  {"text": "To slide on the ice", "dueDate": "2026-03-04", "reps": 4},
-  {"text": "To immerse oneself in work", "dueDate": "2026-03-07", "reps": 5},
-  {"text": "Companies should avoid dark patterns that deceive users", "dueDate": "2026-03-07", "reps": 9},
-  {"text": "Let's go to the beach, whether it rains or is sunny", "dueDate": "2026-03-09", "reps": 9},
-  {"text": "Os enfermeiros estavam na linha de frente durante a pandemia", "dueDate": "2026-03-09", "reps": 2},
-  {"text": "He's a bit controlling with money", "dueDate": "2026-03-10", "reps": 7},
-  {"text": "Ela sempre usa um rabo de cavalo pra malhar", "dueDate": "2026-03-12", "reps": 8},
-  {"text": "Ao comprar a TV, verifique o tamanho da tela em polegadas, pois é assim que os fabricantes listam", "dueDate": "2026-03-12", "reps": 2},
-  {"text": "É normal que haja diferenças culturais.", "dueDate": "2026-03-12", "reps": 2},
-  {"text": "O comediante deixou a plateia em êxtase.", "dueDate": "2026-03-13", "reps": 2},
-  {"text": "O carro deslizou na pista molhada –", "dueDate": "2026-03-15", "reps": 4},
-  {"text": "To erase the board", "dueDate": "2026-03-16", "reps": 11},
-  {"text": "we need to look for a quick solution", "dueDate": "2026-03-17", "reps": 3},
-  {"text": "No show de stand-up, o comediante matou a pau.", "dueDate": "2026-03-18", "reps": 2},
-  {"text": "He spoke (barely) some English on the trip.", "dueDate": "2026-03-20", "reps": 4},
-  {"text": "To blow out the candle", "dueDate": "2026-03-20", "reps": 5},
-  {"text": "No decorrer do ano, vamos revisar os resultados trimestralmente.", "dueDate": "2026-03-24", "reps": 9},
-  {"text": "To use an eraser to fix a mistake", "dueDate": "2026-03-26", "reps": 6},
-  {"text": "Who gives a crap about that?", "dueDate": "2026-03-26", "reps": 11},
-  {"text": "Windscreen wiper", "dueDate": "2026-03-28", "reps": 5},
-  {"text": "I love languages; for me, I'm decoding the world around me.", "dueDate": "2026-03-29", "reps": 4},
-  {"text": "To dive into the swimming pool", "dueDate": "2026-03-30", "reps": 4},
-  {"text": "Quem quer que ligue, diga que eu não estou", "dueDate": "2026-03-31", "reps": 5},
-  {"text": "o locador | o proprietário", "dueDate": "2026-03-31", "reps": 5},
-  {"text": "Ele arranhou um pouco de inglês na viagem", "dueDate": "2026-04-04", "reps": 6},
-  {"text": "Usar a borracha para apagar um erro", "dueDate": "2026-04-04", "reps": 4},
-  {"text": "Male cats are more cuddly and affectionate than", "dueDate": "2026-04-06", "reps": 7},
-  {"text": "To turn on the windshield wipers in the rain", "dueDate": "2026-04-07", "reps": 5},
-  {"text": "Apagar da memória", "dueDate": "2026-04-07", "reps": 5},
-  {"text": "It's no use crying over spilled milk", "dueDate": "2026-04-07", "reps": 6},
-  {"text": "To get deeply into a book", "dueDate": "2026-04-08", "reps": 4},
-  {"text": "I've been climbing on and off for a few years.", "dueDate": "2026-04-09", "reps": 3},
-  {"text": "To erase the past/move on", "dueDate": "2026-04-09", "reps": 10},
-  {"text": "É fundamental reduzir a carga cognitiva do usuário em cada etapa do processo", "dueDate": "2026-04-09", "reps": 5},
-  {"text": "If it tastes like X, I won't like it", "dueDate": "2026-04-10", "reps": 4},
-  {"text": "When I realized I almost missed the flight, I thought: \"What a mess it could have been\"", "dueDate": "2026-04-14", "reps": 6},
-  {"text": "This topic is self-explanatory and requires no further explanation", "dueDate": "2026-04-14", "reps": 8},
-  {"text": "Para onde quer que vá, sempre se divertem à beça", "dueDate": "2026-04-16", "reps": 3},
-  {"text": "Pincel", "dueDate": "2026-04-16", "reps": 4},
-  {"text": "It is essential to reduce the user's cognitive load at each stage of the process", "dueDate": "2026-04-16", "reps": 2},
-  {"text": "The weather has been great", "dueDate": "2026-04-18", "reps": 7},
-  {"text": "To use a fine brush to paint details", "dueDate": "2026-04-19", "reps": 3},
-  {"text": "Ligar o limpador de para-brisa na chuva", "dueDate": "2026-04-20", "reps": 4},
-  {"text": "Where's the screwdriver?", "dueDate": "2026-04-22", "reps": 9},
-  {"text": "A floresta parecia calma durante o dia, mas à noite se tornava assustadora, cheia de sons estranhos.", "dueDate": "2026-04-24", "reps": 4},
-  {"text": "Learning a new language is like decoding a secret code", "dueDate": "2026-04-26", "reps": 10},
-  {"text": "That science fiction movie was more my vibe", "dueDate": "2026-04-27", "reps": 10},
-  {"text": "Riscar o chão com giz", "dueDate": "2026-04-28", "reps": 3},
-  {"text": "Makeup brush", "dueDate": "2026-05-02", "reps": 4},
-  {"text": "At the stand-up show, the comedian nailed it.", "dueDate": "2026-05-03", "reps": 11},
-  {"text": "This chair is wobbly, it needs a screw", "dueDate": "2026-05-03", "reps": 6},
-  {"text": "Meu gato me arranhou", "dueDate": "2026-05-05", "reps": 4},
-  {"text": "Mergulhar de cabeça em um projeto", "dueDate": "2026-05-10", "reps": 4},
-  {"text": "Pelo que eu saiba, a reunião está marcada para amanhã de manhã", "dueDate": "2026-05-14", "reps": 4},
-  {"text": "To cross out a name from the list", "dueDate": "2026-05-14", "reps": 5},
-  {"text": "Era para ele ter embarcado há duas horas, mas seu voo foi cancelado", "dueDate": "2026-05-22", "reps": 3},
-  {"text": "Quer saiba a resposta quer não, tem que esperar a sua vez", "dueDate": "2026-05-24", "reps": 4},
-  {"text": "I'd give anything to not have a test tomorrow", "dueDate": "2026-05-25", "reps": 3},
-  {"text": "Ana is not coming to work. She's been ill", "dueDate": "2026-05-30", "reps": 5},
-  {"text": "É possível que hoje ainda chova", "dueDate": "2026-06-03", "reps": 4},
-  {"text": "She always knew that one day she would open her own business.", "dueDate": "2026-06-13", "reps": 13},
-  {"text": "É necessário que ela aprenda uma língua.", "dueDate": "2026-06-16", "reps": 4},
-  {"text": "Arranhar a superfície de algo", "dueDate": "2026-06-17", "reps": 5},
-  {"text": "To change the windshield wiper rubber", "dueDate": "2026-06-18", "reps": 6},
-  {"text": "Apagar o quadro", "dueDate": "2026-06-27", "reps": 6},
-  {"text": "If I'm not wrong, she departs tomorrow morning", "dueDate": "2026-06-27", "reps": 11},
-  {"text": "O autismo é considerado um transtorno do espectro", "dueDate": "2026-06-29", "reps": 5},
-  {"text": "The nurses were on the front line during the pandemic", "dueDate": "2026-07-01", "reps": 7},
-  {"text": "Ele ainda está procurando trabalho", "dueDate": "2026-07-09", "reps": 3},
-  {"text": "Now that the company is doing well, we can expand.", "dueDate": "2026-07-14", "reps": 4},
-  {"text": "O tempo tem estado ótimo", "dueDate": "2026-07-20", "reps": 6},
-  {"text": "Riscar", "dueDate": "2026-07-26", "reps": 4},
-  {"text": "É uma pena que eles não possam vir.", "dueDate": "2026-07-27", "reps": 5},
-  {"text": "Eles instalaram uma rampa de acesso para cadeirantes", "dueDate": "2026-07-28", "reps": 2},
-  {"text": "Passar a borracha no passado", "dueDate": "2026-07-28", "reps": 3},
-  {"text": "Na rodovia, pagamos pedágio", "dueDate": "2026-07-29", "reps": 7},
-  {"text": "É melhor que você consulte um médico.", "dueDate": "2026-08-11", "reps": 6},
-  {"text": "To dive headfirst into a project", "dueDate": "2026-08-19", "reps": 5},
-  {"text": "Cadê a chave de fenda?", "dueDate": "2026-08-24", "reps": 6},
-  {"text": "Não é verdade que ela mente o tempo todo.", "dueDate": "2026-08-26", "reps": 6},
-  {"text": "It's not true that she lies all the time.", "dueDate": "2026-08-28", "reps": 10},
-  {"text": "To dip the brush in paint", "dueDate": "2026-08-29", "reps": 5},
-  {"text": "After reading the summary, I understood the premise of the book immediately", "dueDate": "2026-09-08", "reps": 7},
-  {"text": "Mergulhar na piscina", "dueDate": "2026-09-14", "reps": 3},
-  {"text": "Aprender um novo idioma é como decodificar um código secreto", "dueDate": "2026-09-23", "reps": 4},
-  {"text": "To erase", "dueDate": "2026-09-26", "reps": 3},
-  {"text": "É aconselhável que vocês descansem todos os dias.", "dueDate": "2026-10-01", "reps": 9},
-  {"text": "Os gatos machos são mais fofos e carinhosos do que as gatas fêmeas, que geralmente são mais independentes", "dueDate": "2026-10-03", "reps": 4},
-  {"text": "To dive into the sea", "dueDate": "2026-10-14", "reps": 4},
-  {"text": "Mergulhar no trabalho", "dueDate": "2026-10-22", "reps": 3},
-  {"text": "Você sabe cuidar de plantas?", "dueDate": "2026-10-24", "reps": 2},
-  {"text": "A paint brush", "dueDate": "2026-10-28", "reps": 3},
-  {"text": "Usar um pincel fino para pintar detalhes", "dueDate": "2026-10-30", "reps": 3},
-  {"text": "My cat scratched me", "dueDate": "2026-10-31", "reps": 3},
-  {"text": "Arranhar a pintura do carro", "dueDate": "2026-11-03", "reps": 4},
-  {"text": "Pincel de maquiagem", "dueDate": "2026-11-04", "reps": 3},
-  {"text": "The car skidded on the wet road/lane", "dueDate": "2026-11-10", "reps": 7},
-  {"text": "Mergulhar", "dueDate": "2026-11-14", "reps": 4},
-  {"text": "Deslizar", "dueDate": "2026-11-15", "reps": 3},
-  {"text": "Este tópico é autoexplicativo e não requer mais explicações", "dueDate": "2026-11-18", "reps": 5},
-  {"text": "Daria tudo para não ter prova amanhã", "dueDate": "2026-11-27", "reps": 4},
-  {"text": "Mergulhar o pincel na tinta", "dueDate": "2026-11-29", "reps": 4},
-  {"text": "To scratch", "dueDate": "2026-11-30", "reps": 4},
-  {"text": "Apagar a vela", "dueDate": "2026-12-03", "reps": 5},
-  {"text": "Apagar as luzes", "dueDate": "2026-12-04", "reps": 3},
-  {"text": "An eraser", "dueDate": "2026-12-06", "reps": 7},
-  {"text": "Ele está se preparando para o vestibular e faz um cursinho intensivo aos finais de semana", "dueDate": "2026-12-13", "reps": 2},
-  {"text": "Para-brisa", "dueDate": "2026-12-23", "reps": 4},
-  {"text": "To erase from memory", "dueDate": "2027-01-08", "reps": 4},
-  {"text": "Trocar a borracha do para-brisa", "dueDate": "2027-01-08", "reps": 4},
-  {"text": "To swipe your finger on the phone screen", "dueDate": "2027-01-17", "reps": 7},
-  {"text": "To dive (Scooba diving)", "dueDate": "2027-01-25", "reps": 3},
-  {"text": "A Ana não vem trabalhar. Tem estado doente", "dueDate": "2027-02-14", "reps": 2},
-  {"text": "O oftalmologista me deu uma receita de óculos depois do exame", "dueDate": "2027-02-23", "reps": 2},
-  {"text": "Mergulhar em um livro", "dueDate": "2027-02-23", "reps": 5},
-  {"text": "I need to schedule an appointment with the ophthalmologist to check my vision", "dueDate": "2027-02-28", "reps": 3},
-  {"text": "I need to cross this item off the list", "dueDate": "2027-03-04", "reps": 4},
-  {"text": "To scratch out", "dueDate": "2027-03-14", "reps": 5},
-  {"text": "Riscar um nome da lista", "dueDate": "2027-03-14", "reps": 5},
-  {"text": "Por onde quer que passem, são aclamados", "dueDate": "2027-04-15", "reps": 2},
-  {"text": "The ophthalmologist gave me a glasses prescription after the exam", "dueDate": "2027-05-12", "reps": 3},
-  {"text": "To turn off the lights", "dueDate": "2027-06-30", "reps": 6},
-  {"text": "How about a coffee before the meeting?", "dueDate": "2027-07-09", "reps": 3},
-  {"text": "Meu sobrinho caiu e agora está banguelo.", "dueDate": "2027-07-09", "reps": 3},
-  {"text": "Preciso marcar uma consulta com o oftalmologista para checar minha visão", "dueDate": "2027-10-03", "reps": 3},
-  {"text": "Arranhar", "dueDate": "2027-11-16", "reps": 4},
-  {"text": "Preciso riscar esse item da lista", "dueDate": "2028-01-02", "reps": 5},
-  {"text": "Deslizar o dedo na tela do celular", "dueDate": "2028-02-14", "reps": 3},
-  {"text": "Mergulhar no mar", "dueDate": "2028-02-19", "reps": 4},
-  {"text": "Tendo em mente as limitações de tempo, precisamos ajustar o cronograma", "dueDate": "2028-04-15", "reps": 3},
-  {"text": "Deslizar no gelo", "dueDate": "2028-10-03", "reps": 3},
-  {"text": "Na pesquisa, utilizamos a classificação de cartões para entender os modelos mentais dos usuários", "dueDate": "2028-11-03", "reps": 2},
-];
 // ─── RemNote Last Practiced Dates ───
 const REMNOTE_LAST_PRACTICED = [
   // Solidifying — from Feb 07, 2026 batch
@@ -831,73 +456,14 @@ const REMNOTE_LAST_PRACTICED = [
   {"text": "Por onde quer que venha, vão pegar um trânsito daqueles", "lastPracticed": "2025-12-12"},
   {"text": "Ele faz o que quer que seja para subir na vida", "lastPracticed": "2025-12-11"},
 ];
-// Apply RemNote due dates and last practiced dates to cards (one-time migration)
-// Returns { cards, practiceDayCounts } where practiceDayCounts maps date -> review count
-const applyRemnoteDueDates = (cards) => {
-  // Build due date lookup: normalize text -> {dueDate, reps}
-  const dueLookup = new Map();
-  for (const entry of REMNOTE_DUE_DATES) {
-    dueLookup.set(entry.text.toLowerCase().trim(), { dueDate: entry.dueDate, reps: entry.reps });
+// Number of cards last practiced on each date, tallied from the RemNote import.
+// Used to backfill day-counts that were imported without a per-day count.
+const remnotePracticeDayTally = () => {
+  const counts = {};
+  for (const e of REMNOTE_LAST_PRACTICED) {
+    if (e && e.lastPracticed) counts[e.lastPracticed] = (counts[e.lastPracticed] || 0) + 1;
   }
-  // Build last practiced lookup: normalize text -> lastPracticed date
-  const practicedLookup = new Map();
-  for (const entry of REMNOTE_LAST_PRACTICED) {
-    practicedLookup.set(entry.text.toLowerCase().trim(), entry.lastPracticed);
-  }
-  let updated = 0;
-  const practiceDayCounts = {};
-  const result = cards.map(card => {
-    // Try matching against word, translation, and phrase
-    const candidates = [card.word, card.translation, card.phrase].filter(Boolean);
-    for (const field of candidates) {
-      const key = field.toLowerCase().trim();
-      const dueMatch = dueLookup.get(key);
-      const lastPracticed = practicedLookup.get(key);
-      if (dueMatch) {
-        updated++;
-        // Use real lastReview if available, otherwise fall back to today
-        const reviewDate = lastPracticed || localDateStr();
-        // Calculate stability from real interval: dueDate - lastReview
-        const dueMs = new Date(dueMatch.dueDate + "T12:00:00");
-        const reviewMs = new Date(reviewDate + "T12:00:00");
-        const intervalDays = Math.max(1, Math.round((dueMs - reviewMs) / 86400000));
-        // In FSRS: stability ≈ interval
-        const stability = Math.max(1, intervalDays);
-        // Estimate difficulty from reps (more reps + longer intervals = easier)
-        const difficulty = Math.min(10, Math.max(1, 7 - dueMatch.reps * 0.3));
-        // Track practice day for heatmap + activity chart
-        if (lastPracticed) {
-          practiceDayCounts[lastPracticed] = (practiceDayCounts[lastPracticed] || 0) + 1;
-        }
-        return {
-          ...card,
-          dueDate: dueMatch.dueDate,
-          reps: dueMatch.reps,
-          stability,
-          difficulty,
-          lastReview: reviewDate,
-          modifiedAt: Date.now(),
-        };
-      }
-    }
-    return card;
-  });
-  if (updated > 0) console.log(`[RemNote migration] Updated ${updated} cards with due dates, last practiced, and FSRS state`);
-  return { cards: result, practiceDayCounts };
-};
-// ─── Date Helpers ───
-const localDateStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const today = () => localDateStr();
-// practiceDays entries can be either a legacy number (single-device) or an object
-// keyed by device ID (multi-device). Always read through totalForDay.
-const totalForDay = (entry) => {
-  if (typeof entry === "number") return entry;
-  if (entry && typeof entry === "object") {
-    let sum = 0;
-    for (const v of Object.values(entry)) sum += (typeof v === "number" ? v : 0);
-    return sum;
-  }
-  return 0;
+  return counts;
 };
 // Stable per-device id, used to shard daily review counts so two devices can
 // study on the same day without one overwriting the other's count.
@@ -1533,19 +1099,6 @@ function CalendarHeatmap({ practiceDays, year, onYearChange }) {
       if (m !== lastMonth) { monthPositions.push({ month: m, weekIndex: wi }); lastMonth = m; }
     }
   });
-  const totalDays = Object.values(practiceDays).filter((v) => totalForDay(v) > 0).length;
-  const currentStreak = (() => {
-    let streak = 0;
-    let d = new Date();
-    if (totalForDay(practiceDays[localDateStr(d)]) === 0) {
-      d.setDate(d.getDate() - 1);
-    }
-    while (true) {
-      const ds = localDateStr(d);
-      if (totalForDay(practiceDays[ds]) > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
-    }
-    return streak;
-  })();
   const totalWeeks = weeks.length;
   const gap = 2;
   return (
@@ -3573,70 +3126,6 @@ const GSheets = {
   },
 };
 // ─── Merge Logic ───
-const mergeCards = (localCards, remoteCards, localDeleted, remoteDeleted) => {
-  const merged = {};
-  const mergedDeleted = {};
-  // Combine deletions, keep newer timestamp per ID
-  for (const [id, t] of Object.entries(localDeleted || {})) mergedDeleted[id] = Math.max(mergedDeleted[id] || 0, t);
-  for (const [id, t] of Object.entries(remoteDeleted || {})) mergedDeleted[id] = Math.max(mergedDeleted[id] || 0, t);
-  // Index all cards by ID, keep newer version
-  for (const c of localCards) merged[c.id] = c;
-  for (const c of remoteCards) {
-    const existing = merged[c.id];
-    if (!existing) {
-      merged[c.id] = c;
-    } else if ((c.modifiedAt || 0) > (existing.modifiedAt || 0)) {
-      // Remote wins — but preserve local-only fields that remote dropped
-      // (e.g. keywordSpans, which the Apps Script proxy may not persist as a column).
-      // We never want a sync round-trip to erase formatting the user added locally.
-      const preserved = {};
-      if (Array.isArray(existing.keywordSpans) && existing.keywordSpans.length > 0 &&
-          (!Array.isArray(c.keywordSpans) || c.keywordSpans.length === 0)) {
-        preserved.keywordSpans = existing.keywordSpans;
-      }
-      if (existing.firstReviewedAt && !c.firstReviewedAt) preserved.firstReviewedAt = existing.firstReviewedAt;
-      if (existing.firstReview && !c.firstReview) preserved.firstReview = existing.firstReview;
-      merged[c.id] = { ...c, ...preserved };
-    }
-  }
-  // Apply deletions: delete if tombstone is newer than card
-  for (const [id, delTime] of Object.entries(mergedDeleted)) {
-    if (merged[id] && (merged[id].modifiedAt || 0) <= delTime) {
-      delete merged[id];
-    } else if (merged[id]) {
-      // Card modified after deletion — keep card, remove tombstone
-      delete mergedDeleted[id];
-    }
-  }
-  // Tombstones are kept forever (one numeric per delete, negligible size; guarantees
-  // delete propagation even on devices offline for months).
-  return { cards: Object.values(merged), deleted: mergedDeleted };
-};
-const mergePracticeDays = (local, remote) => {
-  const merged = {};
-  const allDays = new Set([
-    ...Object.keys(local || {}),
-    ...Object.keys(remote || {}),
-  ]);
-  for (const day of allDays) {
-    const l = (local || {})[day];
-    const r = (remote || {})[day];
-    // Two legacy numbers — keep the max (best guess at the truth).
-    if (typeof l === "number" && typeof r === "number") {
-      merged[day] = Math.max(l, r);
-      continue;
-    }
-    // One side is per-device object, the other is legacy — promote to per-device.
-    const lObj = typeof l === "object" && l ? l : (typeof l === "number" ? { __legacy__: l } : {});
-    const rObj = typeof r === "object" && r ? r : (typeof r === "number" ? { __legacy__: r } : {});
-    const combined = { ...lObj };
-    for (const [device, count] of Object.entries(rObj)) {
-      combined[device] = Math.max(combined[device] || 0, count || 0);
-    }
-    merged[day] = combined;
-  }
-  return merged;
-};
 // ─── Main App ───
 export default function VocabApp() {
   const mobile = useIsMobile();
@@ -3698,6 +3187,8 @@ export default function VocabApp() {
   const [sheetsSaved, setSheetsSaved] = useState(false);
   const dirtyRef = useRef(false);
   const syncTimerRef = useRef(null);
+  const syncInFlightRef = useRef(false);
+  const syncRerunRef = useRef(false);
   const cardsRef = useRef(cards);
   const practiceDaysRef = useRef(practiceDays);
   const deletedCardsRef = useRef(deletedCards);
@@ -3723,43 +3214,62 @@ export default function VocabApp() {
   }, [mobile, view]);
   T = themes[settings.theme] || themes.light;
   t = i18n[settings.lang] || i18n["pt-BR"];
-  const doSync = useCallback(async (localCards, localDays, scriptUrl) => {
+  // Single reconcile path for every sync trigger. Two invariants make it safe to
+  // run while the user is actively studying:
+  //   1. It merges against the FRESHEST local state (cardsRef.current, read
+  //      synchronously right before setCards with no await in between) — not a
+  //      snapshot captured before the network round-trip. A review made while the
+  //      read was in flight is therefore preserved instead of being reverted.
+  //   2. It commits local state BEFORE writing to the sheet, so a review that
+  //      lands during the remote write layers on top (and re-marks dirty for the
+  //      next sync) rather than being clobbered by a late setCards.
+  // An in-flight guard prevents two overlapping syncs from racing each other's
+  // setCards; a coalescing rerun flag ensures the latest state still gets pushed.
+  const doSync = useCallback(async (scriptUrlArg) => {
+    const scriptUrl = scriptUrlArg || settings.scriptUrl;
     if (!scriptUrl) return;
+    if (syncInFlightRef.current) { syncRerunRef.current = true; return; }
+    syncInFlightRef.current = true;
     setSyncStatus("syncing");
     try {
       // Read remote state
       const remoteCards = await GSheets.readCards(scriptUrl);
       const remoteMeta = await GSheets.readMeta(scriptUrl);
-      // Merge
+      // Capture freshest local state synchronously — no await before setCards.
+      const localCards = cardsRef.current;
+      const localDays = practiceDaysRef.current;
+      const localDeleted = deletedCardsRef.current;
       const { cards: mergedCards, deleted: mergedDeleted } = mergeCards(
-        localCards, remoteCards,
-        deletedCardsRef.current, remoteMeta.deletedCards || {}
+        localCards, remoteCards, localDeleted, remoteMeta.deletedCards || {}
       );
       const mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
-      // Write merged result
-      await GSheets.writeCards(scriptUrl, mergedCards);
-      await GSheets.writeMeta(scriptUrl, mergedDays, mergedDeleted);
-      // Update local state
+      // Commit locally first (see invariant 2).
       setCards(mergedCards);
       setPracticeDays(mergedDays);
       setDeletedCards(mergedDeleted);
-      await window.storage.set("vocab-cards", JSON.stringify(mergedCards)).catch(() => {});
-      await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
-      await window.storage.set("vocab-deleted", JSON.stringify(mergedDeleted)).catch(() => {});
+      dirtyRef.current = false;
+      window.storage.set("vocab-cards", JSON.stringify(mergedCards)).catch(() => {});
+      window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
+      window.storage.set("vocab-deleted", JSON.stringify(mergedDeleted)).catch(() => {});
+      // Then push to the sheet.
+      await GSheets.writeCards(scriptUrl, mergedCards);
+      await GSheets.writeMeta(scriptUrl, mergedDays, mergedDeleted);
       setSyncStatus("synced");
       setLastSynced(new Date().toLocaleTimeString());
       setSyncError("");
     } catch (e) {
       setSyncStatus("error");
       setSyncError(e.message);
+    } finally {
+      syncInFlightRef.current = false;
+      if (syncRerunRef.current) { syncRerunRef.current = false; doSync(scriptUrl); }
     }
-  }, []);
+  }, [settings.scriptUrl]);
   const scheduleSyncIfDirty = useCallback(() => {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     syncTimerRef.current = setTimeout(() => {
       if (dirtyRef.current && settings.scriptUrl) {
-        doSync(cardsRef.current, practiceDaysRef.current, settings.scriptUrl);
-        dirtyRef.current = false;
+        doSync();
       }
     }, 60000);
   }, [settings.scriptUrl, doSync]);
@@ -3786,22 +3296,21 @@ export default function VocabApp() {
       try { const r = await window.storage.get("vocab-deleted"); if (r) localDeleted = JSON.parse(r.value); } catch {}
       try { const r = await window.storage.get("vocab-study-time"); if (r) localStudyTime = JSON.parse(r.value); } catch {}
       try { const r = await window.storage.get("vocab-active-session"); if (r) localActiveSession = JSON.parse(r.value); } catch {}
-      // One-time RemNote due date + last practiced migration
-      let didRemnoteMigration = false;
-      let remnotePracticeDays = {};
+      // Backfill day-counts for imported RemNote study days that were recorded
+      // without a per-day count (stored as empty {} or missing entirely, so they
+      // never showed in the "days studied" tally or the heatmap). Idempotent:
+      // only fills days whose current count is 0, so it never overwrites a real
+      // count and re-running is a no-op once filled.
       try {
-        const migFlag = await window.storage.get("vocab-remnote-migrated-v3");
-        if (!migFlag) {
-          const migResult = applyRemnoteDueDates(localCards);
-          localCards = migResult.cards;
-          remnotePracticeDays = migResult.practiceDayCounts;
-          // Merge RemNote practice days into local days
-          for (const [day, count] of Object.entries(remnotePracticeDays)) {
-            localDays[day] = Math.max(localDays[day] || 0, count);
+        const tally = remnotePracticeDayTally();
+        let backfilled = false;
+        for (const [day, count] of Object.entries(tally)) {
+          if (totalForDay(localDays[day]) === 0) {
+            localDays[day] = count;
+            backfilled = true;
           }
-          didRemnoteMigration = true;
-          await window.storage.set("vocab-remnote-migrated-v3", "1").catch(() => {});
-          await window.storage.set("vocab-cards", JSON.stringify(localCards)).catch(() => {});
+        }
+        if (backfilled) {
           await window.storage.set("vocab-practice-days", JSON.stringify(localDays)).catch(() => {});
         }
       } catch {}
@@ -3850,22 +3359,14 @@ export default function VocabApp() {
           const { cards: merged, deleted: mergedDel } = mergeCards(
             localCards, remoteCards, localDeleted, remoteMeta.deletedCards || {}
           );
-          let mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
-          let finalCards = merged;
-          if (didRemnoteMigration) {
-            const migResult = applyRemnoteDueDates(merged);
-            finalCards = migResult.cards;
-            for (const [day, count] of Object.entries(migResult.practiceDayCounts)) {
-              mergedDays[day] = Math.max(mergedDays[day] || 0, count);
-            }
-          }
-          setCards(finalCards);
+          const mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
+          setCards(merged);
           setPracticeDays(mergedDays);
           setDeletedCards(mergedDel);
-          await window.storage.set("vocab-cards", JSON.stringify(finalCards)).catch(() => {});
+          await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
           await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
           await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
-          await GSheets.writeCards(sUrl, finalCards);
+          await GSheets.writeCards(sUrl, merged);
           await GSheets.writeMeta(sUrl, mergedDays, mergedDel);
           setSyncStatus("synced");
           setLastSynced(new Date().toLocaleTimeString());
@@ -3890,8 +3391,7 @@ export default function VocabApp() {
     };
     const handleVisChange = () => {
       if (document.visibilityState === "hidden" && dirtyRef.current && settings.scriptUrl) {
-        doSync(cardsRef.current, practiceDaysRef.current, settings.scriptUrl);
-        dirtyRef.current = false;
+        doSync();
       }
     };
     window.addEventListener("beforeunload", flushSync);
@@ -3904,31 +3404,8 @@ export default function VocabApp() {
   const manualSync = useCallback(async () => {
     if (!settings.scriptUrl) return;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    setSyncStatus("syncing");
-    try {
-      const remoteCards = await GSheets.readCards(settings.scriptUrl);
-      const remoteMeta = await GSheets.readMeta(settings.scriptUrl);
-      const { cards: merged, deleted: mergedDel } = mergeCards(
-        cards, remoteCards, deletedCards, remoteMeta.deletedCards || {}
-      );
-      const mergedDays = mergePracticeDays(practiceDays, remoteMeta.practiceDays || {});
-      await GSheets.writeCards(settings.scriptUrl, merged);
-      await GSheets.writeMeta(settings.scriptUrl, mergedDays, mergedDel);
-      setCards(merged);
-      setPracticeDays(mergedDays);
-      setDeletedCards(mergedDel);
-      await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
-      await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
-      await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
-      dirtyRef.current = false;
-      setSyncStatus("synced");
-      setLastSynced(new Date().toLocaleTimeString());
-      setSyncError("");
-    } catch (e) {
-      setSyncStatus("error");
-      setSyncError(e.message);
-    }
-  }, [cards, practiceDays, deletedCards, settings.scriptUrl]);
+    await doSync();
+  }, [settings.scriptUrl, doSync]);
   const save = useCallback(async (newCards, newDays) => {
     try {
       await window.storage.set("vocab-cards", JSON.stringify(newCards));
@@ -4019,8 +3496,8 @@ export default function VocabApp() {
     setSettings(newSettings);
     try { await window.storage.set("vocab-settings", JSON.stringify(newSettings)); } catch (e) { console.error("Settings save failed:", e); }
   }, []);
-  const addCard = (card) => { const nc = [...cards, card]; setCards(nc); save(nc, practiceDays); setShowAddInline(false); };
-  const addCards = (newCards) => { const nc = [...cards, ...newCards]; setCards(nc); save(nc, practiceDays); };
+  const addCard = (card) => { setCards((prev) => [...prev, card]); setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0); setShowAddInline(false); };
+  const addCards = (newCards) => { setCards((prev) => [...prev, ...newCards]); setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0); };
   const deleteCard = useCallback((id) => {
     setCards(prev => {
       const nc = prev.filter((c) => c.id !== id);
@@ -4169,17 +3646,21 @@ export default function VocabApp() {
     }
   }, [settings.scriptUrl, applyBackup]);
   const reviewCard = (id, quality) => {
-    const nc = cards.map((c) => c.id === id ? FSRS.review(c, quality) : c);
-    const nd = { ...practiceDays };
     const t = today();
     const dev = getDeviceId();
-    // Migrate legacy numeric entries to the per-device object shape on first write.
-    let entry = nd[t];
-    if (typeof entry === "number") entry = { __legacy__: entry };
-    if (!entry || typeof entry !== "object") entry = {};
-    entry = { ...entry, [dev]: (entry[dev] || 0) + 1 };
-    nd[t] = entry;
-    setCards(nc); setPracticeDays(nd); save(nc, nd);
+    // Functional updates (compute from the freshest state, never a render-time
+    // closure) so a review can't be computed against / clobber a concurrent change
+    // — e.g. a sync's setCards landing in the same tick. Persist from refs after
+    // commit, matching updateCard/deleteCard/etc.
+    setCards((prev) => prev.map((c) => c.id === id ? FSRS.review(c, quality) : c));
+    setPracticeDays((prev) => {
+      // Migrate legacy numeric entries to the per-device object shape on first write.
+      let entry = prev[t];
+      if (typeof entry === "number") entry = { __legacy__: entry };
+      if (!entry || typeof entry !== "object") entry = {};
+      return { ...prev, [t]: { ...entry, [dev]: (entry[dev] || 0) + 1 } };
+    });
+    setTimeout(() => save(cardsRef.current, practiceDaysRef.current), 0);
   };
   const [skippedIds, setSkippedIds] = useState(new Set());
   const skipCard = (id) => { setSkippedIds((prev) => new Set([...prev, id])); };
@@ -4279,6 +3760,19 @@ export default function VocabApp() {
     while (newIdx < freshToday.length) result.push(freshToday[newIdx++]);
     return result;
   }, [cards, skippedIds, settings.cardOrder, settings.newCardsPerDay, newCardsIntroducedToday, tick]);
+  // The card currently being studied is pinned by id, not read off the front of the
+  // queue. A background sync can reshuffle dueCards (e.g. an edit synced from another
+  // device) — pinning means it can't yank you onto a different card mid-answer. When
+  // the pinned card is reviewed/skipped (so it leaves the queue) or otherwise gone,
+  // we fall back to the front of the queue and re-pin to it.
+  const [currentCardId, setCurrentCardId] = useState(null);
+  const currentCard = useMemo(() => {
+    if (dueCards.length === 0) return null;
+    return dueCards.find((c) => c.id === currentCardId) || dueCards[0];
+  }, [dueCards, currentCardId]);
+  useEffect(() => {
+    if (currentCard && currentCard.id !== currentCardId) setCurrentCardId(currentCard.id);
+  }, [currentCard, currentCardId]);
   const sortedCards = useMemo(() => {
     const so = { new: 0, learning: 1, young: 2, mature: 3, mastered: 4 };
     return [...cards].sort((a, b) => {
@@ -4328,10 +3822,10 @@ export default function VocabApp() {
     );
   }
   const practiceBadge = (dueReview || dueNew) ? `${dueReview > 0 ? "D" + dueReview : ""}${dueReview > 0 && dueNew > 0 ? " | " : ""}${dueNew > 0 ? "N" + dueNew : ""}` : null;
-  const daysStudiedThisYear = Object.keys(practiceDays).filter((d) => d.startsWith(String(new Date().getFullYear())) && totalForDay(practiceDays[d]) > 0).length;
+  const daysStudiedThisYear = Object.keys(practiceDays).filter((d) => d.startsWith(String(new Date().getFullYear())) && studiedOnDay(practiceDays[d])).length;
   const navItems = [
     { id: "practice", label: t.practice, badge: practiceBadge },
-    { id: "words", label: t.words, badge: cards.length || null },
+    { id: "words", label: t.words, badge: cards.filter((c) => !c.suspended).length || null },
     { id: "heatmap", label: t.progress, badge: `${daysStudiedThisYear} ${settings.lang === "en" ? "days" : "dias"}` },
   ];
   const todayFormatted = new Date().toLocaleDateString(settings.lang === "en" ? "en-US" : "pt-BR", { weekday: "long", day: "numeric", month: "long" });
@@ -4483,7 +3977,7 @@ export default function VocabApp() {
       <div style={{ padding: mobile ? "20px 16px 100px" : "32px 36px 60px", maxWidth: 1200, margin: "0 auto" }}>
         {view === "practice" && (
           <>
-            {dueCards.length === 0 ? (
+            {!currentCard ? (
               <div style={{ textAlign: "center", padding: "80px 20px" }}>
                 <div style={{ width: 48, height: 48, borderRadius: 24, background: T.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -4513,7 +4007,7 @@ export default function VocabApp() {
                 )}
               </div>
             ) : (
-              <PracticeCard key={dueCards[0].id} card={dueCards[0]} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} setAnswerMode={setAnswerMode} activeSession={activeSession} liveElapsed={liveElapsed} onStartTimer={startTimer} onStopTimer={stopTimer} />
+              <PracticeCard key={currentCard.id} card={currentCard} onReview={reviewCard} onSkip={skipCard} onUpdate={updateCard} onSuspend={suspendCard} totalDue={dueCards.length} studyDirection={studyDirection} answerMode={answerMode} setAnswerMode={setAnswerMode} activeSession={activeSession} liveElapsed={liveElapsed} onStartTimer={startTimer} onStopTimer={stopTimer} />
             )}
           </>
         )}
@@ -4827,17 +4321,17 @@ export default function VocabApp() {
               {[
                 { label: t.daysStudied, value: (() => {
                   const yr = new Date().getFullYear();
-                  return Object.keys(practiceDays).filter((d) => d.startsWith(String(yr)) && totalForDay(practiceDays[d]) > 0).length;
+                  return Object.keys(practiceDays).filter((d) => d.startsWith(String(yr)) && studiedOnDay(practiceDays[d])).length;
                 })() },
                 { label: t.dayStreak, value: (() => {
                   let streak = 0;
                   let d = new Date();
-                  if (totalForDay(practiceDays[localDateStr(d)]) === 0) {
+                  if (!studiedOnDay(practiceDays[localDateStr(d)])) {
                     d.setDate(d.getDate() - 1);
                   }
                   while (true) {
                     const ds = localDateStr(d);
-                    if (totalForDay(practiceDays[ds]) > 0) { streak++; d.setDate(d.getDate() - 1); } else break;
+                    if (studiedOnDay(practiceDays[ds])) { streak++; d.setDate(d.getDate() - 1); } else break;
                   }
                   return streak;
                 })() },
@@ -5893,30 +5387,7 @@ export default function VocabApp() {
                           setSheetsSaved(true);
                           setTimeout(() => setSheetsSaved(false), 2500);
                           if (scriptUrlInput.trim()) {
-                            setSyncStatus("syncing");
-                            try {
-                              const sUrl = scriptUrlInput.trim();
-                              const remoteCards = await GSheets.readCards(sUrl);
-                              const remoteMeta = await GSheets.readMeta(sUrl);
-                              const { cards: merged, deleted: mergedDel } = mergeCards(
-                                cards, remoteCards, deletedCards, remoteMeta.deletedCards || {}
-                              );
-                              const mergedDays = mergePracticeDays(practiceDays, remoteMeta.practiceDays || {});
-                              await GSheets.writeCards(sUrl, merged);
-                              await GSheets.writeMeta(sUrl, mergedDays, mergedDel);
-                              setCards(merged);
-                              setPracticeDays(mergedDays);
-                              setDeletedCards(mergedDel);
-                              await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
-                              await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
-                              await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
-                              setSyncStatus("synced");
-                              setLastSynced(new Date().toLocaleTimeString());
-                              setSyncError("");
-                            } catch(e) {
-                              setSyncStatus("error");
-                              setSyncError(e.message);
-                            }
+                            doSync(scriptUrlInput.trim());
                           }
                         }}
                         disabled={!scriptUrlInput.trim()}
@@ -5936,25 +5407,7 @@ export default function VocabApp() {
                       </button>
                       {settings.scriptUrl && (
                         <button
-                          onClick={async () => {
-                            setSyncStatus("syncing");
-                            try {
-                              const remoteCards = await GSheets.readCards(settings.scriptUrl);
-                              const remoteMeta = await GSheets.readMeta(settings.scriptUrl);
-                              const { cards: merged, deleted: mergedDel } = mergeCards(
-                                cards, remoteCards, deletedCards, remoteMeta.deletedCards || {}
-                              );
-                              const mergedDays = mergePracticeDays(practiceDays, remoteMeta.practiceDays || {});
-                              setCards(merged);
-                              setPracticeDays(mergedDays);
-                              setDeletedCards(mergedDel);
-                              await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
-                              await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
-                              await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
-                              setSyncStatus("synced");
-                              setLastSynced(new Date().toLocaleTimeString());
-                            } catch(e) { setSyncStatus("error"); setSyncError(e.message); }
-                          }}
+                          onClick={() => { doSync(); }}
                           style={{
                             padding: "11px 16px", background: "transparent", border: `1px solid ${T.border}`,
                             borderRadius: T.radiusSm, color: T.textSecondary, fontFamily: font.body,
