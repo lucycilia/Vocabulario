@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
-import { onAuth, signIn, signOutUser, subscribe, readOnce, pushCards, removeCard, pushPracticeDays, pushStudyTime, seedAll } from "./sync";
+import { onAuth, signIn, completeRedirect, signOutUser, subscribe, readOnce, pushCards, removeCard, pushPracticeDays, pushStudyTime, seedAll } from "./sync";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -3849,6 +3849,9 @@ export default function VocabApp() {
     }
   }, []);
   useEffect(() => {
+    // If we just came back from a redirect sign-in (iOS standalone), finish it.
+    // Success surfaces via onAuth below; only surface hard errors.
+    completeRedirect().catch((e) => console.error("Redirect sign-in failed:", e));
     const unsub = onAuth((u) => {
       setUser(u);
       authedRef.current = !!u;
@@ -3921,6 +3924,8 @@ export default function VocabApp() {
   useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
   const persistStudyTime = useCallback((next) => {
     window.storage.set("vocab-study-time", JSON.stringify(next)).catch(() => {});
+    // Sync study-timer totals to Firebase too, so they carry across devices.
+    if (authedRef.current) pushStudyTime(next).catch(() => {});
   }, []);
   const setStudyTimeForDate = useCallback((date, seconds) => {
     setStudyTime((prev) => {

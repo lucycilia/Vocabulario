@@ -16,11 +16,12 @@
 // orders writes on the SERVER. Two devices can never clobber each other over a
 // disagreeing clock — the bug that plagued the Google-Sheets sync.
 
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   onAuthStateChanged,
   setPersistence,
@@ -50,7 +51,9 @@ const firebaseConfig = {
 
 const ROOT = "vocab";
 
-const app = initializeApp(firebaseConfig);
+// Reuse an existing app if one's already initialized (avoids duplicate-app
+// errors under hot-reload / double imports).
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
 // Stay signed in across reloads — sign in once per device.
@@ -59,8 +62,13 @@ setPersistence(auth, browserLocalPersistence).catch(() => {});
 const provider = new GoogleAuthProvider();
 
 // ─── Auth ───
+// Always use a full-page redirect (not a pop-up). Pop-ups are blocked inside
+// iOS home-screen apps and cause auth/cancelled-popup-request errors; redirect
+// works everywhere — desktop, mobile Safari, and standalone home-screen apps.
 export const onAuth = (cb) => onAuthStateChanged(auth, cb);
-export const signIn = () => signInWithPopup(auth, provider);
+export const signIn = () => signInWithRedirect(auth, provider);
+// Completes a redirect sign-in when the app reloads after returning from Google.
+export const completeRedirect = () => getRedirectResult(auth);
 export const signOutUser = () => signOut(auth);
 export const currentUser = () => auth.currentUser;
 
