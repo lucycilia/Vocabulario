@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
-import { onAuth, signIn, completeRedirect, signOutUser, subscribe, readOnce, pushCards, removeCard, pushPracticeDays, pushStudyTime, seedAll } from "./sync";
+import { onAuth, signIn, completeRedirect, signOutUser, subscribe, pushCards, removeCard, pushPracticeDays, pushStudyTime, seedAll } from "./sync";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -3514,37 +3514,6 @@ const GSheets = {
     try { deletedCards = JSON.parse(data.deletedCards || "{}"); } catch {}
     return { practiceDays, deletedCards };
   },
-  // Write all cards (full overwrite)
-  writeCards: async (scriptUrl, cards) => {
-    const res = await fetch(scriptUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action: "writeCards", cards }),
-    });
-    if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-  },
-  // Write practice days + deleted cards metadata
-  writeMeta: async (scriptUrl, practiceDays, deletedCards) => {
-    const res = await fetch(scriptUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({
-        action: "writeMeta",
-        practiceDays: JSON.stringify(practiceDays),
-        deletedCards: JSON.stringify(deletedCards || {}),
-      }),
-    });
-    if (!res.ok) throw new Error(`Sync meta-write failed: ${res.status}`);
-    try {
-      const data = await res.json();
-      if (data && data.error) throw new Error(data.error);
-    } catch (e) {
-      // Response wasn't JSON; if status was ok, treat as success
-      if (e.message && e.message.startsWith("Sync meta-write")) throw e;
-    }
-  },
   // Snapshot — append a JSON snapshot row to the "Backups" tab
   writeSnapshot: async (scriptUrl, snapshot) => {
     const res = await fetch(scriptUrl, {
@@ -3572,71 +3541,6 @@ const GSheets = {
     if (data && data.error) throw new Error(data.error);
     return data.snapshot || null;
   },
-};
-// ─── Merge Logic ───
-const mergeCards = (localCards, remoteCards, localDeleted, remoteDeleted) => {
-  const merged = {};
-  const mergedDeleted = {};
-  // Combine deletions, keep newer timestamp per ID
-  for (const [id, t] of Object.entries(localDeleted || {})) mergedDeleted[id] = Math.max(mergedDeleted[id] || 0, t);
-  for (const [id, t] of Object.entries(remoteDeleted || {})) mergedDeleted[id] = Math.max(mergedDeleted[id] || 0, t);
-  // Index all cards by ID, keep newer version
-  for (const c of localCards) merged[c.id] = c;
-  for (const c of remoteCards) {
-    const existing = merged[c.id];
-    if (!existing) {
-      merged[c.id] = c;
-    } else if ((c.modifiedAt || 0) > (existing.modifiedAt || 0)) {
-      // Remote wins — but preserve local-only fields that remote dropped
-      // (e.g. keywordSpans, which the Apps Script proxy may not persist as a column).
-      // We never want a sync round-trip to erase formatting the user added locally.
-      const preserved = {};
-      if (Array.isArray(existing.keywordSpans) && existing.keywordSpans.length > 0 &&
-          (!Array.isArray(c.keywordSpans) || c.keywordSpans.length === 0)) {
-        preserved.keywordSpans = existing.keywordSpans;
-      }
-      if (existing.firstReviewedAt && !c.firstReviewedAt) preserved.firstReviewedAt = existing.firstReviewedAt;
-      if (existing.firstReview && !c.firstReview) preserved.firstReview = existing.firstReview;
-      merged[c.id] = { ...c, ...preserved };
-    }
-  }
-  // Apply deletions: delete if tombstone is newer than card
-  for (const [id, delTime] of Object.entries(mergedDeleted)) {
-    if (merged[id] && (merged[id].modifiedAt || 0) <= delTime) {
-      delete merged[id];
-    } else if (merged[id]) {
-      // Card modified after deletion — keep card, remove tombstone
-      delete mergedDeleted[id];
-    }
-  }
-  // Tombstones are kept forever (one numeric per delete, negligible size; guarantees
-  // delete propagation even on devices offline for months).
-  return { cards: Object.values(merged), deleted: mergedDeleted };
-};
-const mergePracticeDays = (local, remote) => {
-  const merged = {};
-  const allDays = new Set([
-    ...Object.keys(local || {}),
-    ...Object.keys(remote || {}),
-  ]);
-  for (const day of allDays) {
-    const l = (local || {})[day];
-    const r = (remote || {})[day];
-    // Two legacy numbers — keep the max (best guess at the truth).
-    if (typeof l === "number" && typeof r === "number") {
-      merged[day] = Math.max(l, r);
-      continue;
-    }
-    // One side is per-device object, the other is legacy — promote to per-device.
-    const lObj = typeof l === "object" && l ? l : (typeof l === "number" ? { __legacy__: l } : {});
-    const rObj = typeof r === "object" && r ? r : (typeof r === "number" ? { __legacy__: r } : {});
-    const combined = { ...lObj };
-    for (const [device, count] of Object.entries(rObj)) {
-      combined[device] = Math.max(combined[device] || 0, count || 0);
-    }
-    merged[day] = combined;
-  }
-  return merged;
 };
 // ─── Main App ───
 export default function VocabApp() {
@@ -3694,11 +3598,7 @@ export default function VocabApp() {
   const [keySaved, setKeySaved] = useState(false);
   const [scriptUrlInput, setScriptUrlInput] = useState(DEFAULT_SCRIPT_URL);
   const [syncStatus, setSyncStatus] = useState("idle");
-  const [syncError, setSyncError] = useState("");
   const [lastSynced, setLastSynced] = useState(null);
-  const [sheetsSaved, setSheetsSaved] = useState(false);
-  const dirtyRef = useRef(false);
-  const syncTimerRef = useRef(null);
   // ── Firebase auth + sync state ──
   const [user, setUser] = useState(null);
   const [authResolved, setAuthResolved] = useState(false);
@@ -3733,11 +3633,6 @@ export default function VocabApp() {
   }, [mobile, view]);
   T = themes[settings.theme] || themes.light;
   t = i18n[settings.lang] || i18n["pt-BR"];
-  // Legacy Google-Sheets sync — retired. Firebase (src/sync.js) is now the source of
-  // truth and syncs in realtime, so these are inert no-ops kept only so older callers
-  // and UI buttons don't break. Nothing here writes to the Sheet anymore.
-  const doSync = useCallback(async () => {}, []);
-  const scheduleSyncIfDirty = useCallback(() => {}, []);
   useEffect(() => {
     const load = async () => {
       let savedSettings = null;
@@ -3882,12 +3777,6 @@ export default function VocabApp() {
     });
     return () => { unsub && unsub(); if (subRef.current) { subRef.current(); subRef.current = null; } };
   }, [runMigration]);
-  // Firebase syncs continuously and in realtime, so there's nothing to "sync now".
-  // Kept as a harmless resolved promise so the old Settings button doesn't error.
-  const manualSync = useCallback(async () => {
-    setSyncStatus("synced");
-    setLastSynced(new Date().toLocaleTimeString());
-  }, []);
   const save = useCallback(async (newCards, newDays) => {
     // Instant-load cache (also keeps the app usable offline before RTDB resolves)
     try {

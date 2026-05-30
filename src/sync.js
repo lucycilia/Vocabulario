@@ -33,7 +33,6 @@ import {
   onValue,
   update,
   remove,
-  get,
 } from "firebase/database";
 
 const firebaseConfig = {
@@ -92,12 +91,6 @@ export const subscribe = (cb, onError) => {
     // Fires on permission-denied (rules not set, or wrong account signed in).
     (err) => { if (onError) onError(err); }
   );
-};
-
-// One-off read of the whole tree (used to check whether migration is needed).
-export const readOnce = async () => {
-  const snap = await get(ref(db, ROOT));
-  return snap.val();
 };
 
 // ─── Writes ───
