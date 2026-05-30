@@ -1,9 +1,9 @@
 node_modules/
 dist/
+backups/
 .env
 .env.local
 .DS_Store
 *.local
 .claude/
 .firebase/
-backups/
