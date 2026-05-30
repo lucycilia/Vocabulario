@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo, lazy, Suspense, forwardRef, useImperativeHandle } from "react";
-import { localDateStr, today, totalForDay, studiedOnDay, FSRS, mergeCards, mergePracticeDays } from "./srs.js";
+import { onAuth, signIn, completeRedirect, signOutUser, subscribe, pushCards, removeCard, pushPracticeDays, pushStudyTime, seedAll } from "./sync";
+import { localDateStr, today, totalForDay, studiedOnDay, FSRS } from "./srs.js";
 const RechartsModule = lazy(() =>
   import("recharts").then(mod => ({ default: (props) => props.children(mod) }))
 );
@@ -3066,37 +3067,6 @@ const GSheets = {
     try { deletedCards = JSON.parse(data.deletedCards || "{}"); } catch {}
     return { practiceDays, deletedCards };
   },
-  // Write all cards (full overwrite)
-  writeCards: async (scriptUrl, cards) => {
-    const res = await fetch(scriptUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ action: "writeCards", cards }),
-    });
-    if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-  },
-  // Write practice days + deleted cards metadata
-  writeMeta: async (scriptUrl, practiceDays, deletedCards) => {
-    const res = await fetch(scriptUrl, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({
-        action: "writeMeta",
-        practiceDays: JSON.stringify(practiceDays),
-        deletedCards: JSON.stringify(deletedCards || {}),
-      }),
-    });
-    if (!res.ok) throw new Error(`Sync meta-write failed: ${res.status}`);
-    try {
-      const data = await res.json();
-      if (data && data.error) throw new Error(data.error);
-    } catch (e) {
-      // Response wasn't JSON; if status was ok, treat as success
-      if (e.message && e.message.startsWith("Sync meta-write")) throw e;
-    }
-  },
   // Snapshot — append a JSON snapshot row to the "Backups" tab
   writeSnapshot: async (scriptUrl, snapshot) => {
     const res = await fetch(scriptUrl, {
@@ -3125,7 +3095,6 @@ const GSheets = {
     return data.snapshot || null;
   },
 };
-// ─── Merge Logic ───
 // ─── Main App ───
 export default function VocabApp() {
   const mobile = useIsMobile();
@@ -3182,13 +3151,16 @@ export default function VocabApp() {
   const [keySaved, setKeySaved] = useState(false);
   const [scriptUrlInput, setScriptUrlInput] = useState(DEFAULT_SCRIPT_URL);
   const [syncStatus, setSyncStatus] = useState("idle");
-  const [syncError, setSyncError] = useState("");
   const [lastSynced, setLastSynced] = useState(null);
-  const [sheetsSaved, setSheetsSaved] = useState(false);
-  const dirtyRef = useRef(false);
-  const syncTimerRef = useRef(null);
-  const syncInFlightRef = useRef(false);
-  const syncRerunRef = useRef(false);
+  // ── Firebase auth + sync state ──
+  const [user, setUser] = useState(null);
+  const [authResolved, setAuthResolved] = useState(false);
+  const authedRef = useRef(false);
+  const lastPushedRef = useRef({});   // { id: modifiedAt } already written to RTDB
+  const subRef = useRef(null);        // RTDB unsubscribe fn
+  const migratingRef = useRef(false); // guards the one-time Sheet→RTDB import
+  const [migrationToast, setMigrationToast] = useState(null);
+  const [dbError, setDbError] = useState(null);
   const cardsRef = useRef(cards);
   const practiceDaysRef = useRef(practiceDays);
   const deletedCardsRef = useRef(deletedCards);
@@ -3214,65 +3186,6 @@ export default function VocabApp() {
   }, [mobile, view]);
   T = themes[settings.theme] || themes.light;
   t = i18n[settings.lang] || i18n["pt-BR"];
-  // Single reconcile path for every sync trigger. Two invariants make it safe to
-  // run while the user is actively studying:
-  //   1. It merges against the FRESHEST local state (cardsRef.current, read
-  //      synchronously right before setCards with no await in between) — not a
-  //      snapshot captured before the network round-trip. A review made while the
-  //      read was in flight is therefore preserved instead of being reverted.
-  //   2. It commits local state BEFORE writing to the sheet, so a review that
-  //      lands during the remote write layers on top (and re-marks dirty for the
-  //      next sync) rather than being clobbered by a late setCards.
-  // An in-flight guard prevents two overlapping syncs from racing each other's
-  // setCards; a coalescing rerun flag ensures the latest state still gets pushed.
-  const doSync = useCallback(async (scriptUrlArg) => {
-    const scriptUrl = scriptUrlArg || settings.scriptUrl;
-    if (!scriptUrl) return;
-    if (syncInFlightRef.current) { syncRerunRef.current = true; return; }
-    syncInFlightRef.current = true;
-    setSyncStatus("syncing");
-    try {
-      // Read remote state
-      const remoteCards = await GSheets.readCards(scriptUrl);
-      const remoteMeta = await GSheets.readMeta(scriptUrl);
-      // Capture freshest local state synchronously — no await before setCards.
-      const localCards = cardsRef.current;
-      const localDays = practiceDaysRef.current;
-      const localDeleted = deletedCardsRef.current;
-      const { cards: mergedCards, deleted: mergedDeleted } = mergeCards(
-        localCards, remoteCards, localDeleted, remoteMeta.deletedCards || {}
-      );
-      const mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
-      // Commit locally first (see invariant 2).
-      setCards(mergedCards);
-      setPracticeDays(mergedDays);
-      setDeletedCards(mergedDeleted);
-      dirtyRef.current = false;
-      window.storage.set("vocab-cards", JSON.stringify(mergedCards)).catch(() => {});
-      window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
-      window.storage.set("vocab-deleted", JSON.stringify(mergedDeleted)).catch(() => {});
-      // Then push to the sheet.
-      await GSheets.writeCards(scriptUrl, mergedCards);
-      await GSheets.writeMeta(scriptUrl, mergedDays, mergedDeleted);
-      setSyncStatus("synced");
-      setLastSynced(new Date().toLocaleTimeString());
-      setSyncError("");
-    } catch (e) {
-      setSyncStatus("error");
-      setSyncError(e.message);
-    } finally {
-      syncInFlightRef.current = false;
-      if (syncRerunRef.current) { syncRerunRef.current = false; doSync(scriptUrl); }
-    }
-  }, [settings.scriptUrl]);
-  const scheduleSyncIfDirty = useCallback(() => {
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(() => {
-      if (dirtyRef.current && settings.scriptUrl) {
-        doSync();
-      }
-    }, 60000);
-  }, [settings.scriptUrl, doSync]);
   useEffect(() => {
     const load = async () => {
       let savedSettings = null;
@@ -3348,80 +3261,112 @@ export default function VocabApp() {
         }
       }
       setLoaded(true);
-
-      // Background sync with Google Sheets
-      const sUrl = savedSettings?.scriptUrl || DEFAULT_SCRIPT_URL;
-      if (sUrl) {
-        setSyncStatus("syncing");
-        try {
-          const remoteCards = await GSheets.readCards(sUrl);
-          const remoteMeta = await GSheets.readMeta(sUrl);
-          const { cards: merged, deleted: mergedDel } = mergeCards(
-            localCards, remoteCards, localDeleted, remoteMeta.deletedCards || {}
-          );
-          const mergedDays = mergePracticeDays(localDays, remoteMeta.practiceDays || {});
-          setCards(merged);
-          setPracticeDays(mergedDays);
-          setDeletedCards(mergedDel);
-          await window.storage.set("vocab-cards", JSON.stringify(merged)).catch(() => {});
-          await window.storage.set("vocab-practice-days", JSON.stringify(mergedDays)).catch(() => {});
-          await window.storage.set("vocab-deleted", JSON.stringify(mergedDel)).catch(() => {});
-          await GSheets.writeCards(sUrl, merged);
-          await GSheets.writeMeta(sUrl, mergedDays, mergedDel);
-          setSyncStatus("synced");
-          setLastSynced(new Date().toLocaleTimeString());
-        } catch (e) {
-          setSyncStatus("error");
-          setSyncError(e.message);
-        }
-      }
+      // Firebase is the source of truth now — the auth/subscribe effect below takes
+      // over from here. Local cache above is just for instant paint before sign-in.
     };
     load();
     if ("speechSynthesis" in window) { window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices(); }
   }, []);
+  // ── Firebase: track sign-in, subscribe to the live data, and run the one-time
+  //    Sheet→Firebase import the first time the database is found empty. ──
+  const runMigration = useCallback(async () => {
+    if (migratingRef.current) return;
+    migratingRef.current = true;
+    try {
+      setMigrationToast({ message: "Importing your cards from Google Sheets…" });
+      const url = DEFAULT_SCRIPT_URL;
+      const remoteCards = await GSheets.readCards(url);
+      const remoteMeta = await GSheets.readMeta(url);
+      if (!remoteCards || remoteCards.length === 0) {
+        setMigrationToast({ message: "No cards found in the sheet to import." });
+        setTimeout(() => setMigrationToast(null), 5000);
+        return;
+      }
+      await seedAll({
+        cards: remoteCards,
+        practiceDays: remoteMeta.practiceDays || {},
+        deletedCards: remoteMeta.deletedCards || {},
+        studyTime: studyTimeRef.current || {},
+      });
+      setMigrationToast({ message: `Imported ${remoteCards.length} cards ✓` });
+      setTimeout(() => setMigrationToast(null), 5000);
+    } catch (e) {
+      console.error("Migration failed:", e);
+      setMigrationToast({ message: `Import failed: ${e.message}` });
+    }
+  }, []);
   useEffect(() => {
-    const flushSync = () => {
-      if (dirtyRef.current && settings.scriptUrl) {
-        const payload = JSON.stringify({ action: "writeCards", cards: cardsRef.current });
-        navigator.sendBeacon(settings.scriptUrl, payload);
-        const metaPayload = JSON.stringify({ action: "writeMeta", practiceDays: JSON.stringify(practiceDaysRef.current), deletedCards: JSON.stringify(deletedCardsRef.current) });
-        navigator.sendBeacon(settings.scriptUrl, metaPayload);
-        dirtyRef.current = false;
-      }
-    };
-    const handleVisChange = () => {
-      if (document.visibilityState === "hidden" && dirtyRef.current && settings.scriptUrl) {
-        doSync();
-      }
-    };
-    window.addEventListener("beforeunload", flushSync);
-    document.addEventListener("visibilitychange", handleVisChange);
-    return () => {
-      window.removeEventListener("beforeunload", flushSync);
-      document.removeEventListener("visibilitychange", handleVisChange);
-    };
-  }, [settings.scriptUrl, doSync]);
-  const manualSync = useCallback(async () => {
-    if (!settings.scriptUrl) return;
-    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    await doSync();
-  }, [settings.scriptUrl, doSync]);
+    // If we just came back from a redirect sign-in (iOS standalone), finish it.
+    // Success surfaces via onAuth below; only surface hard errors.
+    completeRedirect().catch((e) => console.error("Redirect sign-in failed:", e));
+    const unsub = onAuth((u) => {
+      setUser(u);
+      authedRef.current = !!u;
+      setAuthResolved(true);
+      // Tear down any previous subscription on sign-out / account change
+      if (subRef.current) { subRef.current(); subRef.current = null; }
+      if (!u) return;
+      let firstSnapshot = true;
+      subRef.current = subscribe(
+        (data) => {
+          setDbError(null);
+          setSyncStatus("synced");
+          // Remember what RTDB already has so save() won't re-push unchanged cards
+          lastPushedRef.current = {};
+          for (const c of data.cards) lastPushedRef.current[c.id] = c.modifiedAt;
+          setCards(data.cards);
+          setPracticeDays(data.practiceDays);
+          setDeletedCards(data.deletedCards);
+          if (data.studyTime && Object.keys(data.studyTime).length) setStudyTime(data.studyTime);
+          setLoaded(true);
+          window.storage.set("vocab-cards", JSON.stringify(data.cards)).catch(() => {});
+          // First time we see an empty database → import from the old Sheet, once.
+          if (firstSnapshot && data.cards.length === 0) runMigration();
+          firstSnapshot = false;
+        },
+        (err) => { setDbError(err?.message || String(err)); setLoaded(true); }
+      );
+    });
+    return () => { unsub && unsub(); if (subRef.current) { subRef.current(); subRef.current = null; } };
+  }, [runMigration]);
   const save = useCallback(async (newCards, newDays) => {
+    // Instant-load cache (also keeps the app usable offline before RTDB resolves)
     try {
       await window.storage.set("vocab-cards", JSON.stringify(newCards));
       await window.storage.set("vocab-practice-days", JSON.stringify(newDays));
     } catch (e) { console.error("Local save failed:", e); }
-    if (settings.scriptUrl) {
-      dirtyRef.current = true;
-      scheduleSyncIfDirty();
-    }
-  }, [settings, scheduleSyncIfDirty]);
+    // Push to Firebase — only the cards that actually changed (diff by modifiedAt),
+    // each written to its own slot so concurrent devices can't clobber each other.
+    if (!authedRef.current) return;
+    try {
+      const changed = [];
+      const seen = new Set();
+      for (const c of newCards) {
+        seen.add(c.id);
+        if (lastPushedRef.current[c.id] !== c.modifiedAt) changed.push(c);
+      }
+      if (changed.length) {
+        await pushCards(changed);
+        for (const c of changed) lastPushedRef.current[c.id] = c.modifiedAt;
+      }
+      // Propagate deletions
+      for (const id of Object.keys(lastPushedRef.current)) {
+        if (!seen.has(id)) {
+          await removeCard(id);
+          delete lastPushedRef.current[id];
+        }
+      }
+      if (newDays) await pushPracticeDays(newDays);
+    } catch (e) { console.error("Firebase save failed:", e); }
+  }, []);
   const studyTimeRef = useRef(studyTime);
   const activeSessionRef = useRef(activeSession);
   useEffect(() => { studyTimeRef.current = studyTime; }, [studyTime]);
   useEffect(() => { activeSessionRef.current = activeSession; }, [activeSession]);
   const persistStudyTime = useCallback((next) => {
     window.storage.set("vocab-study-time", JSON.stringify(next)).catch(() => {});
+    // Sync study-timer totals to Firebase too, so they carry across devices.
+    if (authedRef.current) pushStudyTime(next).catch(() => {});
   }, []);
   const setStudyTimeForDate = useCallback((date, seconds) => {
     setStudyTime((prev) => {
@@ -3814,6 +3759,45 @@ export default function VocabApp() {
     () => dueCards.filter(c => (c.reps || 0) === 0 && !c.firstReviewedAt).length,
     [dueCards]
   );
+  // Wait for Firebase to tell us whether a session is already signed in.
+  if (!authResolved) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontFamily: font.display, fontSize: 16, fontWeight: 700, color: T.textTertiary }}>carregando...</span>
+      </div>
+    );
+  }
+  // Signed out → sign-in screen. Data is locked to the owner's Google account.
+  if (!user) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24, padding: 24 }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: font.display, fontSize: 30, fontWeight: 800, color: T.text, marginBottom: 8 }}>vocabulário</div>
+          <div style={{ fontFamily: font.body, fontSize: 15, color: T.textTertiary }}>Entre para acessar seus cartões</div>
+        </div>
+        <button
+          onClick={() => signIn().catch((e) => alert("Sign-in failed: " + (e?.message || e)))}
+          style={{ fontFamily: font.display, fontSize: 15, fontWeight: 700, color: "#fff", background: T.accent || "#2D6A4F", border: "none", borderRadius: 12, padding: "14px 28px", cursor: "pointer" }}
+        >
+          Entrar com Google
+        </button>
+      </div>
+    );
+  }
+  // Database read was denied — almost always means the Rules aren't published yet,
+  // or a different Google account signed in. Show what to do instead of hanging.
+  if (dbError) {
+    return (
+      <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24, textAlign: "center" }}>
+        <div style={{ fontFamily: font.display, fontSize: 20, fontWeight: 800, color: T.text }}>Couldn’t reach your database</div>
+        <div style={{ fontFamily: font.body, fontSize: 14, color: T.textTertiary, maxWidth: 420 }}>
+          Signed in as <strong>{user.email}</strong>. Check that the Realtime Database <strong>Rules</strong> are published and allow this account.
+        </div>
+        <div style={{ fontFamily: font.mono, fontSize: 12, color: T.textTertiary, opacity: 0.7 }}>{dbError}</div>
+        <button onClick={() => signOutUser()} style={{ fontFamily: font.display, fontSize: 14, fontWeight: 700, color: T.text, background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 20px", cursor: "pointer" }}>Sign out</button>
+      </div>
+    );
+  }
   if (!loaded) {
     return (
       <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -3856,38 +3840,6 @@ export default function VocabApp() {
   const headerOnLeave = (e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.bgCard; };
   const headerActions = (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <button
-        onClick={() => settings.scriptUrl ? manualSync() : setShowSettingsModal(true)}
-        disabled={syncStatus === "syncing"}
-        title={syncStatus === "synced" && lastSynced ? `${t.sheetsLastSync} ${lastSynced}` : syncStatus === "error" ? syncError : !settings.scriptUrl ? "Configure Google Sheets sync in settings" : ""}
-        style={headerPillStyle(syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textSecondary)}
-        onMouseEnter={(e) => { if (syncStatus !== "syncing") headerOnEnter(e); }}
-        onMouseLeave={headerOnLeave}
-      >
-        {syncStatus === "syncing" ? (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2.5" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
-            <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-            <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-          </svg>
-        ) : syncStatus === "synced" ? (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.success} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-        ) : syncStatus === "error" ? (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.danger} strokeWidth="2.5" strokeLinecap="round">
-            <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-            <circle cx="12" cy="12" r="10"/>
-          </svg>
-        ) : (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={T.textSecondary} strokeWidth="2.5" strokeLinecap="round">
-            <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-            <path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-          </svg>
-        )}
-        <span>
-          {syncStatus === "syncing" ? t.sheetsSyncing : syncStatus === "synced" ? (lastSynced || t.sheetsSynced) : syncStatus === "error" ? t.sheetsError : "sync"}
-        </span>
-      </button>
       <button
         onClick={() => setShowSettingsModal(true)}
         style={headerCircleStyle}
@@ -4819,6 +4771,17 @@ export default function VocabApp() {
             {backupToast.message}
           </div>
         )}
+        {migrationToast && (
+          <div style={{
+            position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+            background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+            padding: "12px 20px", boxShadow: T.shadowLg,
+            fontFamily: font.body, fontSize: 13, color: T.text,
+            zIndex: 200, maxWidth: "90vw",
+          }}>
+            {migrationToast.message}
+          </div>
+        )}
         <Modal open={showSnapshotPicker} onClose={() => setShowSnapshotPicker(false)} title={t.snapshotPickerTitle}>
           {snapshotList === null ? (
             <div style={{ padding: "40px 20px", textAlign: "center", fontFamily: font.body, fontSize: 13, color: T.textTertiary }}>…</div>
@@ -5328,98 +5291,38 @@ export default function VocabApp() {
                 <div style={{ height: 1, background: T.border }} />
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={syncStatus === "synced" ? T.success : syncStatus === "error" ? T.danger : T.textTertiary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      {syncStatus === "syncing"
-                        ? <><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></>
-                        : syncStatus === "synced"
-                        ? <polyline points="20 6 9 17 4 12"/>
-                        : syncStatus === "error"
-                        ? <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>
-                        : <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></>
-                      }
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.success} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
                     </svg>
                     <div style={{ fontFamily: font.body, fontSize: 14, fontWeight: 600, color: T.text }}>
-                      {t.sheetsSync}
+                      {settings.lang === "en" ? "Cloud sync" : "Sincronização na nuvem"}
                     </div>
-                    {syncStatus === "synced" && lastSynced && (
-                      <span style={{ fontFamily: font.mono, fontSize: 10, color: T.success, marginLeft: "auto" }}>
-                        {t.sheetsLastSync} {lastSynced}
+                    <span style={{ fontFamily: font.mono, fontSize: 10, color: T.success, marginLeft: "auto" }}>
+                      {settings.lang === "en" ? "Synced ✓" : "Sincronizado ✓"}
+                    </span>
+                  </div>
+                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 12, lineHeight: 1.5 }}>
+                    {settings.lang === "en"
+                      ? "Your cards sync automatically and instantly across every device through Firebase. Nothing to configure."
+                      : "Seus cartões sincronizam automática e instantaneamente em todos os dispositivos via Firebase. Nada para configurar."}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", background: T.bgInput, borderRadius: T.radiusSm }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                      <span style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.5 }}>
+                        {settings.lang === "en" ? "Signed in as" : "Conectada como"}
                       </span>
-                    )}
-                    {syncStatus === "syncing" && (
-                      <span style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, marginLeft: "auto" }}>
-                        {t.sheetsSyncing}
+                      <span style={{ fontFamily: font.body, fontSize: 13, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {user?.email}
                       </span>
-                    )}
-                  </div>
-                  <div style={{ fontFamily: font.body, fontSize: 13, color: T.textTertiary, marginBottom: 8, lineHeight: 1.5 }}>
-                    {t.sheetsSyncDesc}
-                  </div>
-                  <div style={{ fontFamily: font.body, fontSize: 12, color: T.warning, marginBottom: 12, lineHeight: 1.5 }}>
-                    {t.sheetsSyncWarn}
-                  </div>
-                  {syncStatus === "error" && (
-                    <div style={{ background: T.dangerBg, border: `1px solid rgba(196,72,62,0.15)`, borderRadius: T.radiusSm, padding: "10px 14px", marginBottom: 12, fontFamily: font.mono, fontSize: 11, color: T.danger }}>
-                      {syncError}
                     </div>
-                  )}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div>
-                      <div style={{ fontFamily: font.mono, fontSize: 10, color: T.textTertiary, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 6 }}>
-                        APPS SCRIPT URL
-                      </div>
-                      <input
-                        type="text"
-                        value={scriptUrlInput}
-                        onChange={(e) => { setScriptUrlInput(e.target.value); setSheetsSaved(false); }}
-                        placeholder="https://script.google.com/macros/s/.../exec"
-                        autoComplete="off"
-                        style={{ width: "100%", padding: "11px 14px", background: T.bgInput, border: "1px solid transparent", borderRadius: T.radiusSm, color: T.text, fontFamily: font.mono, fontSize: 12, outline: "none", boxSizing: "border-box", transition: "border-color 0.2s" }}
-                        onFocus={(e) => { e.target.style.borderColor = T.borderStrong; }}
-                        onBlur={(e) => { e.target.style.borderColor = "transparent"; }}
-                      />
-                    </div>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button
-                        onClick={async () => {
-                          const newSettings = { ...settings, scriptUrl: scriptUrlInput.trim() };
-                          await saveSettings(newSettings);
-                          setSheetsSaved(true);
-                          setTimeout(() => setSheetsSaved(false), 2500);
-                          if (scriptUrlInput.trim()) {
-                            doSync(scriptUrlInput.trim());
-                          }
-                        }}
-                        disabled={!scriptUrlInput.trim()}
-                        style={{
-                          flex: 1, padding: "11px 20px",
-                          background: sheetsSaved ? T.keywordBg : (scriptUrlInput.trim() ? T.accent : T.bgInput),
-                          border: "none", borderRadius: T.radiusSm,
-                          color: sheetsSaved ? T.success : (scriptUrlInput.trim() ? T.bg : T.textPlaceholder),
-                          fontFamily: font.body, fontSize: 13, fontWeight: 600,
-                          cursor: scriptUrlInput.trim() ? "pointer" : "default",
-                          transition: "all 0.2s", letterSpacing: 0.3,
-                        }}
-                        onMouseEnter={(e) => { if (scriptUrlInput.trim() && !sheetsSaved) e.currentTarget.style.opacity = "0.85"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
-                      >
-                        {sheetsSaved ? t.sheetsSynced : t.sheetsSave}
-                      </button>
-                      {settings.scriptUrl && (
-                        <button
-                          onClick={() => { doSync(); }}
-                          style={{
-                            padding: "11px 16px", background: "transparent", border: `1px solid ${T.border}`,
-                            borderRadius: T.radiusSm, color: T.textSecondary, fontFamily: font.body,
-                            fontSize: 13, cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
-                        >
-                          ↓ {t.sheetsSyncing.replace("...", "")} pull
-                        </button>
-                      )}
-                    </div>
+                    <button
+                      onClick={() => signOutUser()}
+                      style={{ padding: "9px 16px", background: "transparent", border: `1px solid ${T.border}`, borderRadius: T.radiusSm, color: T.textSecondary, fontFamily: font.body, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.borderStrong; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; }}
+                    >
+                      {settings.lang === "en" ? "Sign out" : "Sair"}
+                    </button>
                   </div>
                 </div>
                 <div style={{ height: 1, background: T.border }} />
